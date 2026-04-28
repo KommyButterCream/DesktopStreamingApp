@@ -131,6 +131,15 @@
     <ProjectReference Include="..\..\..\Module\Core\Core\Core.vcxproj">
       <Project>{e3bd70c4-fc37-4703-9a54-152fd00bdea2}</Project>
     </ProjectReference>
+    <ProjectReference Include="..\..\..\Module\D3D11DuplicateEngine\D3D11DuplicateEngine\D3D11DuplicateEngine.vcxproj">
+      <Project>{3c17fa80-6514-434b-bc34-efd2203765be}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\..\Module\D3D11ImageView\D3D11ImageView\D3D11ImageView.vcxproj">
+      <Project>{fe98804b-55c7-4bca-bed6-d8785817afc1}</Project>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="DesktopDuplicateApp.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
