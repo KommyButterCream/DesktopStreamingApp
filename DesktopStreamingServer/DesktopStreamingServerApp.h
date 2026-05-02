@@ -1,7 +1,10 @@
 #pragma once
 
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+#endif
+#include <Windows.h>
+#include <objbase.h>
 
 #include <string>
 #include <iostream>
@@ -14,11 +17,11 @@
 #include "../../../Module/NvCodec/NvEncode/D3D11NvEncoder.h"
 #include "../../../Module/NvCodec/NvDecode/D3D11NvDecoder.h"
 
-class DesktopStreamingApp
+class DesktopStreamingServerApp
 {
 public:
-	DesktopStreamingApp() = default;
-	~DesktopStreamingApp()
+	DesktopStreamingServerApp() = default;
+	~DesktopStreamingServerApp()
 	{
 		Shutdown();
 	}
@@ -228,7 +231,7 @@ private:
 		if (!context)
 			return;
 
-		DesktopStreamingApp* self = static_cast<DesktopStreamingApp*>(context->ownerData);
+		DesktopStreamingServerApp* self = static_cast<DesktopStreamingServerApp*>(context->ownerData);
 		if (self)
 		{
 			self->OnFrameCallback();

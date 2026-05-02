@@ -127,6 +127,23 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="DesktopStreamingClientApp.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Module\Core\Core\Core.vcxproj">
+      <Project>{e3bd70c4-fc37-4703-9a54-152fd00bdea2}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\..\Module\D3D11Engine\D3D11Engine\D3D11Engine.vcxproj">
+      <Project>{ec25124d-4c9f-40f6-8b16-ecd4db749cc8}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\..\Module\D3D11ImageView\D3D11ImageView\D3D11ImageView.vcxproj">
+      <Project>{fe98804b-55c7-4bca-bed6-d8785817afc1}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\..\Module\NvCodec\NvCodec\NvCodec.vcxproj">
+      <Project>{a074873b-b8ae-4415-bcd0-0ed579ea6dcb}</Project>
+    </ProjectReference>
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

@@ -2,9 +2,9 @@
 
 #include "../../../Module/Core/DirectX/DxDebugUtils.h"
 
-#include "DesktopStreamingApp.h"
+#include "DesktopStreamingServerApp.h"
 
-static DesktopStreamingApp* g_appInstance = nullptr;
+static DesktopStreamingServerApp* g_appInstance = nullptr;
 
 BOOL WINAPI ConsoleHandler(DWORD ctrlType)
 {
@@ -28,7 +28,7 @@ int main()
 		return hr;
 	}
 
-	DesktopStreamingApp app;
+	DesktopStreamingServerApp app;
 	g_appInstance = &app;
 
 	::SetConsoleCtrlHandler(ConsoleHandler, TRUE);
