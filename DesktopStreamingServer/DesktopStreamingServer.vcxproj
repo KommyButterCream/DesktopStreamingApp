@@ -53,8 +53,7 @@
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
-  <ImportGroup Label="ExtensionSettings">
-  </ImportGroup>
+  <ImportGroup Label="ExtensionSettings" />
   <ImportGroup Label="Shared">
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -134,14 +133,19 @@
     <ProjectReference Include="..\..\..\Module\D3D11DuplicateEngine\D3D11DuplicateEngine\D3D11DuplicateEngine.vcxproj">
       <Project>{3c17fa80-6514-434b-bc34-efd2203765be}</Project>
     </ProjectReference>
+    <ProjectReference Include="..\..\..\Module\D3D11Engine\D3D11Engine\D3D11Engine.vcxproj">
+      <Project>{ec25124d-4c9f-40f6-8b16-ecd4db749cc8}</Project>
+    </ProjectReference>
     <ProjectReference Include="..\..\..\Module\D3D11ImageView\D3D11ImageView\D3D11ImageView.vcxproj">
       <Project>{fe98804b-55c7-4bca-bed6-d8785817afc1}</Project>
     </ProjectReference>
+    <ProjectReference Include="..\..\..\Module\NvCodec\NvCodec\NvCodec.vcxproj">
+      <Project>{a074873b-b8ae-4415-bcd0-0ed579ea6dcb}</Project>
+    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="DesktopDuplicateApp.h" />
+    <ClInclude Include="DesktopStreamingApp.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-  <ImportGroup Label="ExtensionTargets">
-  </ImportGroup>
+  <ImportGroup Label="ExtensionTargets" />
 </Project>

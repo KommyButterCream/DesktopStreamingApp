@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.37203.1 d17.14
+VisualStudioVersion = 17.14.37203.1
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DesktopStreamingApp", "DesktopStreamingApp\DesktopStreamingApp.vcxproj", "{F4396A23-F50B-4C25-9B00-C20D83B1BA1C}"
 EndProject
@@ -38,6 +38,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "D3D11EngineInterface", "D3D
 		..\..\Module\D3D11EngineInterface\IUIElement.h = ..\..\Module\D3D11EngineInterface\IUIElement.h
 		..\..\Module\D3D11EngineInterface\IUIRenderLayer.h = ..\..\Module\D3D11EngineInterface\IUIRenderLayer.h
 	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NvCodec", "..\..\Module\NvCodec\NvCodec\NvCodec.vcxproj", "{A074873B-B8AE-4415-BCD0-0ED579EA6DCB}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -119,6 +121,14 @@ Global
 		{6DCACA2E-50C3-4152-8EB9-4F7025A9537E}.Release|x64.Build.0 = Release|x64
 		{6DCACA2E-50C3-4152-8EB9-4F7025A9537E}.Release|x86.ActiveCfg = Release|Win32
 		{6DCACA2E-50C3-4152-8EB9-4F7025A9537E}.Release|x86.Build.0 = Release|Win32
+		{A074873B-B8AE-4415-BCD0-0ED579EA6DCB}.Debug|x64.ActiveCfg = Debug|x64
+		{A074873B-B8AE-4415-BCD0-0ED579EA6DCB}.Debug|x64.Build.0 = Debug|x64
+		{A074873B-B8AE-4415-BCD0-0ED579EA6DCB}.Debug|x86.ActiveCfg = Debug|Win32
+		{A074873B-B8AE-4415-BCD0-0ED579EA6DCB}.Debug|x86.Build.0 = Debug|Win32
+		{A074873B-B8AE-4415-BCD0-0ED579EA6DCB}.Release|x64.ActiveCfg = Release|x64
+		{A074873B-B8AE-4415-BCD0-0ED579EA6DCB}.Release|x64.Build.0 = Release|x64
+		{A074873B-B8AE-4415-BCD0-0ED579EA6DCB}.Release|x86.ActiveCfg = Release|Win32
+		{A074873B-B8AE-4415-BCD0-0ED579EA6DCB}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -133,6 +143,7 @@ Global
 		{CAB1B3EA-0100-4095-B339-CA0D2B237467} = {26C13A1F-BA6A-4F88-A732-C81AB0B000ED}
 		{6DCACA2E-50C3-4152-8EB9-4F7025A9537E} = {26C13A1F-BA6A-4F88-A732-C81AB0B000ED}
 		{43DDBA6D-AFDF-465B-B03F-4974B8A1252B} = {26C13A1F-BA6A-4F88-A732-C81AB0B000ED}
+		{A074873B-B8AE-4415-BCD0-0ED579EA6DCB} = {26C13A1F-BA6A-4F88-A732-C81AB0B000ED}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {F5A978F7-7031-4500-814E-EA2D4BF29B16}
