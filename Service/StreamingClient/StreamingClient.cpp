@@ -85,7 +85,7 @@ void StreamingClient::OnReceive(ISession* session, uint16_t packetId, const char
 		return;
 	}
 
-	// Job 积己
+	// Job 靸濎劚
 	Job* job = MEMORY_POOL::CreateJob(*GetJobMemoryPool());
 	if (!job)
 	{
@@ -137,7 +137,7 @@ bool StreamingClient::SendChatMessage(const char* message)
 		return false;
 	}
 
-	// Job 积己
+	// Job 靸濎劚
 	Job* job = MEMORY_POOL::CreateJob(*GetJobMemoryPool());
 	if (!job)
 	{
@@ -146,7 +146,7 @@ bool StreamingClient::SendChatMessage(const char* message)
 		return false;
 	}
 
-	// Packet 积己
+	// Packet 靸濎劚
 	void* packetMemory = MEMORY_POOL::CreatePacket(*GetPacketMemoryPool(), sizeof(CS_ECHO_REQUEST_PACKET));
 	CS_ECHO_REQUEST_PACKET* requestPacket = reinterpret_cast<CS_ECHO_REQUEST_PACKET*>(packetMemory);
 	if (!requestPacket)

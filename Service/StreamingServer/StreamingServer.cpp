@@ -84,7 +84,7 @@ void StreamingServer::OnReceive(ISession* session, uint16_t packetId, const char
 		return;
 	}
 
-	// Job »ı¼º
+	// Job ìƒì„±
 	Job* job = MEMORY_POOL::CreateJob(*GetJobMemoryPool());
 	if (!job)
 	{
@@ -100,34 +100,34 @@ void StreamingServer::OnReceive(ISession* session, uint16_t packetId, const char
 
 	if (wasEmpty && enqueueSucceeded)
 	{
-		// JobQueue °¡ ºñ¾îÀÖ¾ú´Ù¸é ReadySessionQueue ¿¡ Session À» ½ºÄÉÁÙ¸µ ÇÏ±â À§ÇØ Push ÇØÁÖ¾î¾ß ÇÑ´Ù.
-		// Áßº¹À¸·Î Session À» Push ÇÏ´Â °ÍÀ» ¹æÁö ÇÏ±â À§ÇØ Processing ÇÃ·¡±×¸¦ Atomic ÇÏ°Ô °Ë»ç.
+		// JobQueue ê°€ ë¹„ì–´ìˆì—ˆë‹¤ë©´ ReadySessionQueue ì— Session ì„ ìŠ¤ì¼€ì¤„ë§ í•˜ê¸° ìœ„í•´ Push í•´ì£¼ì–´ì•¼ í•œë‹¤.
+		// ì¤‘ë³µìœ¼ë¡œ Session ì„ Push í•˜ëŠ” ê²ƒì„ ë°©ì§€ í•˜ê¸° ìœ„í•´ Processing í”Œë˜ê·¸ë¥¼ Atomic í•˜ê²Œ ê²€ì‚¬.
 		if (clientSession->IsProcessingReady())
 		{
-			// Session ÀÌ Idle »óÅÂÀÎ °æ¿ì
-			// ReadySessionQueue ¿¡ Push ÇÏÀÚ!
+			// Session ì´ Idle ìƒíƒœì¸ ê²½ìš°
+			// ReadySessionQueue ì— Push í•˜ì!
 			if (!GetReadySessionQueue()->Push(clientSession))
 			{
-				// Push ½ÇÆĞÇÑ °æ¿ì ÇÃ·¡±×¸¦ ¿ø»ó º¹±¸ÇÏ°í ·Î±× Ã³¸® ÇÏÀÚ.
+				// Push ì‹¤íŒ¨í•œ ê²½ìš° í”Œë˜ê·¸ë¥¼ ì›ìƒ ë³µêµ¬í•˜ê³  ë¡œê·¸ ì²˜ë¦¬ í•˜ì.
 				clientSession->UpdateProcessingFlag(0);
 			}
 		}
 		else
 		{
-			// ÀÌ¹Ì Session ÀÌ Processing Áß ÀÏ ¶§
+			// ì´ë¯¸ Session ì´ Processing ì¤‘ ì¼ ë•Œ
 		}
 	}
 	else
 	{
 		if (!enqueueSucceeded)
 		{
-			// EnqueueJob ¿¡ ½ÇÆĞÇÑ °æ¿ì
+			// EnqueueJob ì— ì‹¤íŒ¨í•œ ê²½ìš°
 			// log...
 		}
 
 		if (enqueueSucceeded && !wasEmpty)
 		{
-			// ÀÌ¹Ì Session ÀÌ Processing Áß ÀÏ ¶§
+			// ì´ë¯¸ Session ì´ Processing ì¤‘ ì¼ ë•Œ
 		}
 	}
 }
