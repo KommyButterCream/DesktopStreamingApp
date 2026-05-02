@@ -41,9 +41,19 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "D3D11EngineInterface", "D3D
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NvCodec", "..\..\Module\NvCodec\NvCodec\NvCodec.vcxproj", "{A074873B-B8AE-4415-BCD0-0ED579EA6DCB}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Network", "Network", "{8E0511E9-9FED-451F-B064-30A4F9E79F68}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Service", "Service", "{8E0511E9-9FED-451F-B064-30A4F9E79F68}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "IOCPNetworkEngine", "..\..\Module\IOCPNetworkEngine\IOCPNetworkEngine\IOCPNetworkEngine.vcxproj", "{8BAEDDCB-B352-4813-A055-9AD3B9EE8653}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Streaming Service Protocol", "Streaming Service Protocol", "{0BA5D14C-AC14-449F-A44B-87A6B7550ABA}"
+	ProjectSection(SolutionItems) = preProject
+		Service\StreamingProtocol\StreamingPacket.h = Service\StreamingProtocol\StreamingPacket.h
+		Service\StreamingProtocol\StreamingPacketID.h = Service\StreamingProtocol\StreamingPacketID.h
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "StreamingServer", "Service\StreamingServer\StreamingServer.vcxproj", "{899A9742-6149-41C8-9422-56686E6B9E3A}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "StreamingClient", "Service\StreamingClient\StreamingClient.vcxproj", "{B5356112-B56D-40F3-9631-4E65B116F077}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -141,6 +151,22 @@ Global
 		{8BAEDDCB-B352-4813-A055-9AD3B9EE8653}.Release|x64.Build.0 = Release|x64
 		{8BAEDDCB-B352-4813-A055-9AD3B9EE8653}.Release|x86.ActiveCfg = Release|Win32
 		{8BAEDDCB-B352-4813-A055-9AD3B9EE8653}.Release|x86.Build.0 = Release|Win32
+		{899A9742-6149-41C8-9422-56686E6B9E3A}.Debug|x64.ActiveCfg = Debug|x64
+		{899A9742-6149-41C8-9422-56686E6B9E3A}.Debug|x64.Build.0 = Debug|x64
+		{899A9742-6149-41C8-9422-56686E6B9E3A}.Debug|x86.ActiveCfg = Debug|Win32
+		{899A9742-6149-41C8-9422-56686E6B9E3A}.Debug|x86.Build.0 = Debug|Win32
+		{899A9742-6149-41C8-9422-56686E6B9E3A}.Release|x64.ActiveCfg = Release|x64
+		{899A9742-6149-41C8-9422-56686E6B9E3A}.Release|x64.Build.0 = Release|x64
+		{899A9742-6149-41C8-9422-56686E6B9E3A}.Release|x86.ActiveCfg = Release|Win32
+		{899A9742-6149-41C8-9422-56686E6B9E3A}.Release|x86.Build.0 = Release|Win32
+		{B5356112-B56D-40F3-9631-4E65B116F077}.Debug|x64.ActiveCfg = Debug|x64
+		{B5356112-B56D-40F3-9631-4E65B116F077}.Debug|x64.Build.0 = Debug|x64
+		{B5356112-B56D-40F3-9631-4E65B116F077}.Debug|x86.ActiveCfg = Debug|Win32
+		{B5356112-B56D-40F3-9631-4E65B116F077}.Debug|x86.Build.0 = Debug|Win32
+		{B5356112-B56D-40F3-9631-4E65B116F077}.Release|x64.ActiveCfg = Release|x64
+		{B5356112-B56D-40F3-9631-4E65B116F077}.Release|x64.Build.0 = Release|x64
+		{B5356112-B56D-40F3-9631-4E65B116F077}.Release|x86.ActiveCfg = Release|Win32
+		{B5356112-B56D-40F3-9631-4E65B116F077}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -157,6 +183,9 @@ Global
 		{43DDBA6D-AFDF-465B-B03F-4974B8A1252B} = {26C13A1F-BA6A-4F88-A732-C81AB0B000ED}
 		{A074873B-B8AE-4415-BCD0-0ED579EA6DCB} = {26C13A1F-BA6A-4F88-A732-C81AB0B000ED}
 		{8BAEDDCB-B352-4813-A055-9AD3B9EE8653} = {26C13A1F-BA6A-4F88-A732-C81AB0B000ED}
+		{0BA5D14C-AC14-449F-A44B-87A6B7550ABA} = {8E0511E9-9FED-451F-B064-30A4F9E79F68}
+		{899A9742-6149-41C8-9422-56686E6B9E3A} = {8E0511E9-9FED-451F-B064-30A4F9E79F68}
+		{B5356112-B56D-40F3-9631-4E65B116F077} = {8E0511E9-9FED-451F-B064-30A4F9E79F68}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {F5A978F7-7031-4500-814E-EA2D4BF29B16}

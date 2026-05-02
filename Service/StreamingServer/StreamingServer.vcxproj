@@ -21,8 +21,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{8f87fe61-2666-45ec-8594-efa350d9eba4}</ProjectGuid>
-    <RootNamespace>DesktopStreamingClient</RootNamespace>
+    <ProjectGuid>{899a9742-6149-41c8-9422-56686e6b9e3a}</ProjectGuid>
+    <RootNamespace>StreamingServer</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -40,13 +40,13 @@
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
@@ -100,10 +100,10 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;D3D11_ENGINE_INTERFACE_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;BUILD_IOCP_STREAMING_SERVER_DLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8</AdditionalOptions>
+      <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -116,10 +116,10 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;D3D11_ENGINE_INTERFACE_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;BUILD_IOCP_STREAMING_SERVER_DLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8</AdditionalOptions>
+      <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -127,23 +127,19 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="main.cpp" />
+    <ClInclude Include="ServerPacketHandler.h" />
+    <ClInclude Include="StreamingServer.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="DesktopStreamingClientApp.h" />
+    <ClCompile Include="ServerPacketHandler.cpp" />
+    <ClCompile Include="StreamingServer.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\..\Module\Core\Core\Core.vcxproj">
+    <ProjectReference Include="..\..\..\..\Module\Core\Core\Core.vcxproj">
       <Project>{e3bd70c4-fc37-4703-9a54-152fd00bdea2}</Project>
     </ProjectReference>
-    <ProjectReference Include="..\..\..\Module\D3D11Engine\D3D11Engine\D3D11Engine.vcxproj">
-      <Project>{ec25124d-4c9f-40f6-8b16-ecd4db749cc8}</Project>
-    </ProjectReference>
-    <ProjectReference Include="..\..\..\Module\D3D11ImageView\D3D11ImageView\D3D11ImageView.vcxproj">
-      <Project>{fe98804b-55c7-4bca-bed6-d8785817afc1}</Project>
-    </ProjectReference>
-    <ProjectReference Include="..\..\..\Module\NvCodec\NvCodec\NvCodec.vcxproj">
-      <Project>{a074873b-b8ae-4415-bcd0-0ed579ea6dcb}</Project>
+    <ProjectReference Include="..\..\..\..\Module\IOCPNetworkEngine\IOCPNetworkEngine\IOCPNetworkEngine.vcxproj">
+      <Project>{8baeddcb-b352-4813-a055-9ad3b9ee8653}</Project>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
