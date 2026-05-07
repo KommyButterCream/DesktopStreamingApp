@@ -15,6 +15,7 @@ namespace PacketHandler
 		bool RegisterHandlers(PacketHandlerTable* handlerTable);
 
 		// Packet Handlers
-		bool HandleEchoRequest(ISession* session, const char* packetData, uint32_t packetSize, const HandlerContext& context);
+		bool HandleSubscribe(ISession* session, const char* packetData, uint32_t packetSize, const HandlerContext& context);
+		bool HandleUnSubscribe(ISession* session, const char* packetData, uint32_t packetSize, const HandlerContext& context);
 	}
 }

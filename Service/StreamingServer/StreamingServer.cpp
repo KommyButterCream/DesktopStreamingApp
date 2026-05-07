@@ -30,6 +30,9 @@ bool StreamingServer::StartServer(const char* ipAddress, const uint16_t port, co
 	if (!IOCPServer::StartServer(ipAddress, port, maxConnectionCount))
 		return false;
 
+	if (!InitializeViewerList(maxConnectionCount))
+		return false;
+
 	bool registerResult = true;
 
 	registerResult &= PacketHandler::Server::RegisterHandlers(GetPacketHandlerTable());
@@ -39,6 +42,8 @@ bool StreamingServer::StartServer(const char* ipAddress, const uint16_t port, co
 
 void StreamingServer::StopServer()
 {
+	FinalizeViewerList();
+
 	IOCPServer::StopServer();
 }
 
@@ -142,4 +147,53 @@ void StreamingServer::OnSend(ISession* session, uint32_t bytesTransferred)
 
 		return;
 	}
+}
+
+bool StreamingServer::HandleSubscribe(ClientSession* session, uint32_t streamId, const HandlerContext& context)
+{
+	return true;
+}
+
+bool StreamingServer::HandleUnsubscribe(ClientSession* session, uint32_t streamId)
+{
+	return true;
+}
+
+bool StreamingServer::InitializeViewerList(uint32_t maxConnectionCount)
+{
+	FinalizeViewerList();
+
+	m_viewers = new ClientSession * [maxConnectionCount] {};
+	if (!m_viewers)
+		return false;
+
+	m_viewerCapacity = maxConnectionCount;
+	m_viewerCount = 0;
+
+	return true;
+}
+
+void StreamingServer::FinalizeViewerList()
+{
+	if (m_viewers)
+	{
+		delete[] m_viewers;
+		m_viewers = nullptr;
+	}
+
+	m_viewerCapacity = 0;
+	m_viewerCount = 0;
+}
+
+bool StreamingServer::AddViewer(ClientSession* session)
+{
+	if (!m_viewers || !session)
+		return false;
+
+
+	return false;
+}
+
+void StreamingServer::RemoveViewer(ClientSession* session)
+{
 }

@@ -5,7 +5,9 @@
 #include "../../../../Module/IOCPNetworkEngine/Memory/SlabMemoryPoolHelper.h" // for MEMORY_POOL
 
 #include "../StreamingProtocol/StreamingPacket.h" // for Request, Response Packet Structure
-#include "../StreamingProtocol/StreamingPacketID.h" // for ECHO_PACKET_ID
+#include "../StreamingProtocol/StreamingPacketID.h" // for PACKET_ID
+
+#include "../StreamingServer/StreamingServer.h"
 
 namespace PacketHandler
 {
@@ -15,41 +17,38 @@ namespace PacketHandler
 		{
 			bool registerResult = true;
 
-			registerResult &= handlerTable->Register(ToPacketID(ECHO_PACKET_ID::CS_ECHO_REQUEST), HandleEchoRequest);
+			registerResult &= handlerTable->Register(ToPacketID(DESKTOP_STREAMING_PACKET_ID::CS_DESKTOP_STREAMING_SUBSCRIBE), HandleSubscribe);
+			registerResult &= handlerTable->Register(ToPacketID(DESKTOP_STREAMING_PACKET_ID::CS_DESKTOP_STREAMING_UNSUBSCRIBE), HandleUnSubscribe);
 
 			return registerResult;
 		}
 
-		bool HandleEchoRequest(ISession* session, const char* packetData, uint32_t packetSize, const HandlerContext& context)
+		bool HandleSubscribe(ISession* session, const char* packetData, uint32_t packetSize, const HandlerContext& context)
 		{
+			if (!session || !packetData || packetSize != sizeof(CS_DESKTOP_STREAMING_SUBSCRIBE_PACKET))
+				return false;
+
 			ClientSession* clientSession = static_cast<ClientSession*>(session);
-
-			if (!clientSession || !packetData)
+			StreamingServer* server = static_cast<StreamingServer*>(context.serviceContext);
+			if (!clientSession || !server)
 				return false;
 
-			const CS_ECHO_REQUEST_PACKET* requestPacket = reinterpret_cast<const CS_ECHO_REQUEST_PACKET*>(packetData);
+			const CS_DESKTOP_STREAMING_SUBSCRIBE_PACKET* requestPacket = reinterpret_cast<const CS_DESKTOP_STREAMING_SUBSCRIBE_PACKET*>(packetData);
+			return server->HandleSubscribe(clientSession, requestPacket->streamId, context);
+		}
 
-			void* packetMemory = MEMORY_POOL::CreatePacket(*context.packetMemoryPool, sizeof(SC_ECHO_RESPONSE_PACKET));
-			SC_ECHO_RESPONSE_PACKET* responsePacket = reinterpret_cast<SC_ECHO_RESPONSE_PACKET*>(packetMemory);
-			if (!responsePacket)
+		bool HandleUnSubscribe(ISession* session, const char* packetData, uint32_t packetSize, const HandlerContext& context)
+		{
+			if (!session || !packetData || packetSize != sizeof(CS_DESKTOP_STREAMING_UNSUBSCRIBE_PACKET))
 				return false;
 
-			responsePacket->header.packetId = ToPacketID(ECHO_PACKET_ID::SC_ECHO_RESPONSE);
-			responsePacket->header.packetSize = sizeof(SC_ECHO_RESPONSE_PACKET);
-
-			responsePacket->requestId = requestPacket->requestId;
-
-			size_t messageLength = strnlen_s(requestPacket->message, sizeof(requestPacket->message) - 1);
-			memcpy_s(responsePacket->message, sizeof(responsePacket->message), requestPacket->message, messageLength);
-			responsePacket->message[messageLength] = '\0';
-
-			if (!clientSession->EnqueueSendPacket(reinterpret_cast<void**>(&responsePacket), packetSize))
-			{
-				__debugbreak();
+			ClientSession* clientSession = static_cast<ClientSession*>(session);
+			StreamingServer* server = static_cast<StreamingServer*>(context.serviceContext);
+			if (!clientSession || !server)
 				return false;
-			}
 
-			return true;
+			const CS_DESKTOP_STREAMING_UNSUBSCRIBE_PACKET* requestPacket = reinterpret_cast<const CS_DESKTOP_STREAMING_UNSUBSCRIBE_PACKET*>(packetData);
+			return server->HandleUnsubscribe(clientSession, requestPacket->streamId);
 		}
 	}
 }

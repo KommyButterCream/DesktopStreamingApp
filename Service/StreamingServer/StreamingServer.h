@@ -25,4 +25,22 @@ private:
 	void OnClientDisconnect(ISession* session) override;
 	void OnReceive(ISession* session, uint16_t packetId, const char* packetData, uint32_t packetSize) override;
 	void OnSend(ISession* session, uint32_t bytesTransferred) override;
+
+
+public:
+	bool HandleSubscribe(ClientSession* session, uint32_t streamId, const HandlerContext& context);
+	bool HandleUnsubscribe(ClientSession* session, uint32_t streamId);
+
+private:
+	bool InitializeViewerList(uint32_t maxConnectionCount);
+	void FinalizeViewerList();
+
+	bool AddViewer(ClientSession* session);
+	void RemoveViewer(ClientSession* session);
+
+private:
+	ClientSession** m_viewers = nullptr;
+	uint32_t m_viewerCapacity = 0;
+	uint32_t m_viewerCount = 0;
+	mutable SRWLOCK m_viewerLock = SRWLOCK_INIT;
 };
