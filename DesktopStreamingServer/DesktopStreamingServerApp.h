@@ -16,6 +16,7 @@
 #include "../../../Module/D3D11ImageView/D3D11ImageView/D3D11ImageView.h"
 #include "../../../Module/NvCodec/NvEncode/D3D11NvEncoder.h"
 #include "../../../Module/NvCodec/NvDecode/D3D11NvDecoder.h"
+#include "../Service/StreamingServer/StreamingServer.h"
 
 class DesktopStreamingServerApp
 {
@@ -118,6 +119,20 @@ public:
 
 		m_callbackContext.imageView = m_imageView;
 
+		m_streamingServer = new StreamingServer();
+		if (!m_streamingServer)
+		{
+			Shutdown();
+			return false;
+		}
+
+		m_streamingServer->SetStreamInfo(static_cast<uint16_t>(outputWidth), static_cast<uint16_t>(outputHeight), 60, DESKTOP_STREAM_CODEC_TYPE::H264);
+		if (!m_streamingServer->StartServer("0.0.0.0", 27015, 64))
+		{
+			Shutdown();
+			return false;
+		}
+
 		m_duplicateEngine->SetTargetFps(60);
 		m_duplicateEngine->SetFrameCaptureCallback(FrameCallbackThunk, &m_callbackContext);
 
@@ -180,6 +195,13 @@ public:
 			m_duplicateEngine->Shutdown();
 			delete m_duplicateEngine;
 			m_duplicateEngine = nullptr;
+		}
+
+		if (m_streamingServer)
+		{
+			m_streamingServer->StopServer();
+			delete m_streamingServer;
+			m_streamingServer = nullptr;
 		}
 
 		if (m_imageView)
@@ -277,26 +299,36 @@ private:
 			return;
 		}
 
-		if (!m_nvDecoder->Parse(encodeResultPacket.data, encodeResultPacket.size, true, false, false))
+		if (m_streamingServer)
 		{
-			__debugbreak();
-
-			m_duplicateEngine->ReleaseLatestFrameHandle(frameHandle);
-
-			return;
+			m_streamingServer->BroadcastEncodedFrame(
+				encodeResultPacket.data,
+				encodeResultPacket.size,
+				frameHandle.frameId,
+				encodeResultPacket.timestamp,
+				encodeResultPacket.frameType);
 		}
 
-		if (D3D11NvDecoder::Frame* frame = m_nvDecoder->GetFrame())
-		{
-			if (m_imageView && frame->sharedHandle)
-			{
-				m_imageView->UpdateSharedTexture(frame->sharedHandle);
-			}
-			else if (m_imageView && frame->texture)
-			{
-				m_imageView->UpdateTexture(frame->texture);
-			}
-		}
+		//if (!m_nvDecoder->Parse(encodeResultPacket.data, encodeResultPacket.size, true, false, false))
+		//{
+		//	__debugbreak();
+
+		//	m_duplicateEngine->ReleaseLatestFrameHandle(frameHandle);
+
+		//	return;
+		//}
+
+		//if (D3D11NvDecoder::Frame* frame = m_nvDecoder->GetFrame())
+		//{
+		//	if (m_imageView && frame->sharedHandle)
+		//	{
+		//		m_imageView->UpdateSharedTexture(frame->sharedHandle);
+		//	}
+		//	else if (m_imageView && frame->texture)
+		//	{
+		//		m_imageView->UpdateTexture(frame->texture);
+		//	}
+		//}
 		
 		m_duplicateEngine->ReleaseLatestFrameHandle(frameHandle);
 	}
@@ -310,4 +342,5 @@ private:
 	D3D11NvEncoder* m_nvEncoder = nullptr;
 	D3D11NvDecoder* m_nvDecoder = nullptr;
 	D3D11ImageView* m_imageView = nullptr;
+	StreamingServer* m_streamingServer = nullptr;
 };

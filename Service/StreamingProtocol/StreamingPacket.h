@@ -4,7 +4,9 @@
 #include "StreamSessionContext.h"
 #include "../../../../Module/IOCPNetworkEngine/Protocol/PacketHeader.h"
 
-#pragma pack(push)
+#include <stddef.h>
+
+#pragma pack(push, 1)
 
 struct CS_DESKTOP_STREAMING_SUBSCRIBE_PACKET
 {
@@ -31,7 +33,7 @@ struct CS_DESKTOP_STREAMING_INFO_PACKET
 		sizeof(CS_DESKTOP_STREAMING_INFO_PACKET));
 
 	uint32_t streamId = DESKTOP_STREAM_ID_PRIMARY;
-	uint32_t sttreamInfoVersion = 1;
+	uint32_t streamInfoVersion = 1;
 	uint32_t codecConfigVersion = 1;
 	uint16_t codecType = static_cast<uint16_t>(DESKTOP_STREAM_CODEC_TYPE::NONE);
 	uint16_t width = 1280;
@@ -70,6 +72,11 @@ inline uint16_t MakeDesktopStreamingPacketSize(uint32_t size)
 	}
 
 	return static_cast<uint16_t>(size);
+}
+
+inline constexpr uint32_t GetDesktopStreamingFrameChunkHeaderSize()
+{
+	return static_cast<uint32_t>(offsetof(SC_DESKTOP_STREAMING_FRAME_CHUNK_PACKET, chunkData));
 }
 
 inline uint16_t MakeDesktopStreamingVariablePacketSize(uint32_t baseSize, uint32_t payloadSize)

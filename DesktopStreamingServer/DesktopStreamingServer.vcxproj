@@ -144,6 +144,12 @@
     <ProjectReference Include="..\..\..\Module\NvCodec\NvCodec\NvCodec.vcxproj">
       <Project>{a074873b-b8ae-4415-bcd0-0ed579ea6dcb}</Project>
     </ProjectReference>
+    <ProjectReference Include="..\..\..\Module\IOCPNetworkEngine\IOCPNetworkEngine\IOCPNetworkEngine.vcxproj">
+      <Project>{8baeddcb-b352-4813-a055-9ad3b9ee8653}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\Service\StreamingServer\StreamingServer.vcxproj">
+      <Project>{899a9742-6149-41c8-9422-56686e6b9e3a}</Project>
+    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DesktopStreamingServerApp.h" />

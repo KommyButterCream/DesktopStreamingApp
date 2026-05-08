@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#include "../../../../Module/IOCPNetworkEngine/Session/ISessionContext.h"
+#include "../../../../Module/IOCPNetworkEngine/Session/SessionContext.h"
 
 constexpr uint32_t DESKTOP_STREAM_ID_PRIMARY = 1;
 constexpr uint32_t DESKTOP_STREAM_MAX_FRAME_SIZE = 256 * 1024;
