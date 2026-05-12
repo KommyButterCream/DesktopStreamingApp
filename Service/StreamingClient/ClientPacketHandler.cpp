@@ -1,11 +1,14 @@
 #include "ClientPacketHandler.h"
 
-#include "../../../../Module/IOCPNetworkEngine/HandlerTable/PacketHandlerTable.h" // for PacketHandlerTable
-#include "../../../../Module/IOCPNetworkEngine/Session/ClientSession.h" // for ClientSession
+#include <cstring>
+
+#include "../../../../Module/IOCPNetworkEngine/HandlerTable/PacketHandlerTable.h"
+#include "../../../../Module/IOCPNetworkEngine/Session/ClientSession.h"
 #include "../../../../Module/Core/Util/Logger.h"
 
-#include "../StreamingProtocol/StreamingPacket.h" // for Request, Response Packet Structure
-#include "../StreamingProtocol/StreamingPacketID.h" // for ECHO_PACKET_ID
+#include "../StreamingProtocol/StreamingPacket.h"
+#include "../StreamingProtocol/StreamingPacketID.h"
+#include "StreamingClient.h"
 
 using namespace Core::Util;
 
@@ -15,52 +18,111 @@ namespace PacketHandler
 	{
 		bool RegisterHandlers(PacketHandlerTable* handlerTable)
 		{
+			if (!handlerTable)
+				return false;
+
 			bool registerResult = true;
 
-			registerResult &= handlerTable->Register(ToPacketID(ECHO_PACKET_ID::CS_ECHO_REQUEST), HandleEchoRequest);
-			registerResult &= handlerTable->Register(ToPacketID(ECHO_PACKET_ID::SC_ECHO_RESPONSE), HandleEchoResponse);
+			registerResult &= handlerTable->Register(ToPacketID(DESKTOP_STREAMING_PACKET_ID::SC_DESKTOP_STREAMING_INFO), HandleStreamInfo);
+			registerResult &= handlerTable->Register(ToPacketID(DESKTOP_STREAMING_PACKET_ID::SC_DESKTOP_STREAMING_FRAME_CHUNK), HandleFrameChunk);
 
 			return registerResult;
 		}
 
-		bool HandleEchoRequest(ISession* session, const char* packetData, uint32_t packetSize, const HandlerContext& context)
+		bool HandleStreamInfo(ISession* session, const char* packetData, uint32_t packetSize, const HandlerContext& context)
 		{
-			if (!session || !packetData || packetSize < sizeof(CS_ECHO_REQUEST_PACKET))
+			if (!session || !packetData || packetSize != sizeof(CS_DESKTOP_STREAMING_INFO_PACKET))
+				return false;
+
+			StreamingClient* streamingClient = static_cast<StreamingClient*>(context.serviceContext);
+			if (!streamingClient)
+				return false;
+
+			const CS_DESKTOP_STREAMING_INFO_PACKET* infoPacket = reinterpret_cast<const CS_DESKTOP_STREAMING_INFO_PACKET*>(packetData);
+
+			Logger::Log(LogLevel::LOG_INFO, "[%s][Session : %u] stream info received (streamId=%u, %ux%u, codec=%u, infoVersion=%u, configVersion=%u)",
+				__FUNCTION__,
+				session->GetSessionID(),
+				infoPacket->streamId,
+				infoPacket->width,
+				infoPacket->height,
+				infoPacket->codecType,
+				infoPacket->streamInfoVersion,
+				infoPacket->codecConfigVersion);
+
+			return streamingClient->HandleStreamInfo(infoPacket);
+		}
+
+		bool HandleFrameChunk(ISession* session, const char* packetData, uint32_t packetSize, const HandlerContext& context)
+		{
+			constexpr uint32_t chunkHeaderSize = GetDesktopStreamingFrameChunkHeaderSize();
+			if (!session || !packetData || packetSize < chunkHeaderSize)
 				return false;
 
 			ClientSession* clientSession = static_cast<ClientSession*>(session);
-
-			if (!clientSession || !packetData)
+			DesktopStreamClientSessionContext* streamContext = clientSession ? dynamic_cast<DesktopStreamClientSessionContext*>(clientSession->GetSessionContext()) : nullptr;
+			StreamingClient* streamingClient = static_cast<StreamingClient*>(context.serviceContext);
+			if (!clientSession || !streamContext || !streamingClient)
 				return false;
 
-			void* sendData = const_cast<char*>(packetData);
-			if (!clientSession->EnqueueSendPacket(&sendData, packetSize))
+			const SC_DESKTOP_STREAMING_FRAME_CHUNK_PACKET* chunkPacket = reinterpret_cast<const SC_DESKTOP_STREAMING_FRAME_CHUNK_PACKET*>(packetData);
+			const uint32_t expectedPacketSize = MakeDesktopStreamingVariablePacketSize(chunkHeaderSize, chunkPacket->chunkDataSize);
+			if (packetSize != expectedPacketSize)
+				return false;
+
+			if (chunkPacket->streamId != streamContext->streamId && streamContext->hasStreamInfo)
+				return false;
+
+			if (chunkPacket->totalFrameSize == 0 || chunkPacket->totalFrameSize > DESKTOP_STREAM_MAX_FRAME_SIZE)
+				return false;
+
+			if (chunkPacket->chunkCount == 0 || chunkPacket->chunkIndex >= chunkPacket->chunkCount)
+				return false;
+
+			if ((chunkPacket->chunkOffset + chunkPacket->chunkDataSize) > chunkPacket->totalFrameSize)
+				return false;
+
+			if (!streamContext->reassembling || streamContext->currentFrameId != chunkPacket->frameId)
 			{
-				__debugbreak();
+				streamContext->reassembling = true;
+				streamContext->currentFrameId = chunkPacket->frameId;
+				streamContext->currentTimestamp = chunkPacket->timestamp;
+				streamContext->expectedFrameSize = chunkPacket->totalFrameSize;
+				streamContext->receivedFrameSize = 0;
+				streamContext->expectedChunkCount = chunkPacket->chunkCount;
+				streamContext->nextChunkIndex = 0;
+				streamContext->frameType = chunkPacket->frameType;
+			}
+
+			if (streamContext->expectedFrameSize != chunkPacket->totalFrameSize ||
+				streamContext->expectedChunkCount != chunkPacket->chunkCount ||
+				streamContext->nextChunkIndex != chunkPacket->chunkIndex)
+			{
+				streamContext->reassembling = false;
+				streamContext->receivedFrameSize = 0;
+				streamContext->nextChunkIndex = 0;
 				return false;
 			}
 
-			// 현재 Send 중인 패킷 데이터에 대한 소유권 포기.
-			// Send IO Complete 시점에 패킷 메모리 해제함.
-			clientSession->ClearCurrentJobData();
+			memcpy(streamContext->frameBuffer + chunkPacket->chunkOffset, chunkPacket->chunkData, chunkPacket->chunkDataSize);
+			streamContext->receivedFrameSize += chunkPacket->chunkDataSize;
+			++streamContext->nextChunkIndex;
 
-			return true;
-		}
+			if (streamContext->receivedFrameSize == streamContext->expectedFrameSize &&
+				streamContext->nextChunkIndex == streamContext->expectedChunkCount)
+			{
+				streamContext->reassembling = false;
 
-		bool HandleEchoResponse(ISession* session, const char* packetData, uint32_t packetSize, const HandlerContext& context)
-		{
-			if (!session || !packetData || packetSize < sizeof(SC_ECHO_RESPONSE_PACKET))
-				return false;
+				Logger::Log(LogLevel::LOG_HIGH, "[%s][Session : %u] frame reassembly success (frameId=%llu, frameType=%u, bytes=%u, chunks=%u)",
+					__FUNCTION__,
+					session->GetSessionID(),
+					static_cast<unsigned long long>(streamContext->currentFrameId),
+					streamContext->frameType,
+					streamContext->receivedFrameSize,
+					streamContext->expectedChunkCount);
 
-			ClientSession* clientSession = static_cast<ClientSession*>(session);
-
-			if (!clientSession)
-				return false;
-
-
-			const SC_ECHO_RESPONSE_PACKET* responsePacket = reinterpret_cast<const SC_ECHO_RESPONSE_PACKET*>(packetData);
-
-			Logger::Log(LogLevel::LOG_HIGH, "[%d][%s] Response[%s] : %s", (int32_t)session->GetClientSocket(), __FUNCTION__, "CHAT_ECHO_PACKET_RESPONSE", responsePacket->message);
+				return streamingClient->HandleFrameComplete(*streamContext);
+			}
 
 			return true;
 		}

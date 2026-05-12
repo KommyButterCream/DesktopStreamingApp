@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#include "../../../../Module/IOCPNetworkEngine/Job/JobDefs.h" // for HandlerContext
+#include "../../../../Module/IOCPNetworkEngine/Job/JobDefs.h"
 
 class ISession;
 class PacketHandlerTable;
@@ -11,11 +11,9 @@ namespace PacketHandler
 {
 	namespace Client
 	{
-		// Register
 		bool RegisterHandlers(PacketHandlerTable* handlerTable);
 
-		// Packet Handlers
-		bool HandleEchoRequest(ISession* session, const char* packetData, uint32_t packetSize, const HandlerContext& context);
-		bool HandleEchoResponse(ISession* session, const char* packetData, uint32_t packetSize, const HandlerContext& context);
+		bool HandleStreamInfo(ISession* session, const char* packetData, uint32_t packetSize, const HandlerContext& context);
+		bool HandleFrameChunk(ISession* session, const char* packetData, uint32_t packetSize, const HandlerContext& context);
 	}
 }

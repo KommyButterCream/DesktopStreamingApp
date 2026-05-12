@@ -13,7 +13,7 @@
 #include "../../../Module/D3D11Engine/Core/D3D11RenderEngine.h"
 #include "../../../Module/D3D11DuplicateEngine/D3D11DuplicateEngine/D3D11DuplicateEngine.h"
 #include "../../../Module/D3D11DuplicateEngine/D3D11DuplicateEngine/CommonTypes.h"
-#include "../../../Module/D3D11ImageView/D3D11ImageView/D3D11ImageView.h"
+//#include "../../../Module/D3D11ImageView/D3D11ImageView/D3D11ImageView.h"
 #include "../../../Module/NvCodec/NvEncode/D3D11NvEncoder.h"
 #include "../../../Module/NvCodec/NvDecode/D3D11NvDecoder.h"
 #include "../Service/StreamingServer/StreamingServer.h"
@@ -103,22 +103,23 @@ public:
 			return false;
 		}
 
-		DWORD windowStyle = WS_VISIBLE | WS_OVERLAPPEDWINDOW;
-		m_imageView = new D3D11ImageView();
-		if (!m_imageView)
-		{
-			Shutdown();
-			return false;
-		}
+		//DWORD windowStyle = WS_VISIBLE | WS_OVERLAPPEDWINDOW;
+		//m_imageView = new D3D11ImageView();
+		//if (!m_imageView)
+		//{
+		//	Shutdown();
+		//	return false;
+		//}
 
-		if (!m_imageView->Initialize(GetDesktopWindow(), RECT(0, 0, 1920, 900), windowStyle))
-		{
-			Shutdown();
-			return false;
-		}
+		//if (!m_imageView->Initialize(GetDesktopWindow(), RECT(0, 0, 1920, 900), windowStyle))
+		//{
+		//	Shutdown();
+		//	return false;
+		//}
 
-		m_callbackContext.imageView = m_imageView;
+		//m_callbackContext.imageView = m_imageView;
 
+		uint16_t fps = 10;
 		m_streamingServer = new StreamingServer();
 		if (!m_streamingServer)
 		{
@@ -126,14 +127,14 @@ public:
 			return false;
 		}
 
-		m_streamingServer->SetStreamInfo(static_cast<uint16_t>(outputWidth), static_cast<uint16_t>(outputHeight), 60, DESKTOP_STREAM_CODEC_TYPE::H264);
+		m_streamingServer->SetStreamInfo(static_cast<uint16_t>(outputWidth), static_cast<uint16_t>(outputHeight), fps, DESKTOP_STREAM_CODEC_TYPE::H264);
 		if (!m_streamingServer->StartServer("0.0.0.0", 27015, 64))
 		{
 			Shutdown();
 			return false;
 		}
 
-		m_duplicateEngine->SetTargetFps(60);
+		m_duplicateEngine->SetTargetFps(fps);
 		m_duplicateEngine->SetFrameCaptureCallback(FrameCallbackThunk, &m_callbackContext);
 
 		if (!m_duplicateEngine->StartThread())
@@ -204,11 +205,11 @@ public:
 			m_streamingServer = nullptr;
 		}
 
-		if (m_imageView)
-		{
-			delete m_imageView;
-			m_imageView = nullptr;
-		}
+		//if (m_imageView)
+		//{
+		//	delete m_imageView;
+		//	m_imageView = nullptr;
+		//}
 
 		if (m_nvDecoder)
 		{

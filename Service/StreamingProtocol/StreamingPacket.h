@@ -4,6 +4,7 @@
 #include "StreamSessionContext.h"
 #include "../../../../Module/IOCPNetworkEngine/Protocol/PacketHeader.h"
 
+#include <limits.h>
 #include <stddef.h>
 
 #pragma pack(push, 1)

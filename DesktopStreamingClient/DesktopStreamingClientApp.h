@@ -13,6 +13,7 @@
 #include "../../../Module/D3D11Engine/Core/D3D11RenderEngine.h"
 #include "../../../Module/D3D11ImageView/D3D11ImageView/D3D11ImageView.h"
 #include "../../../Module/NvCodec/NvDecode/D3D11NvDecoder.h"
+#include "../Service/StreamingClient/StreamingClient.h"
 
 class DesktopStreamingClientApp
 {
@@ -82,6 +83,22 @@ public:
 			return false;
 		}
 
+		m_streamingClient = new StreamingClient();
+		if (!m_streamingClient)
+		{
+			Shutdown();
+			return false;
+		}
+
+		m_streamingClient->SetStreamInfoCallback(StreamInfoCallback, this);
+		m_streamingClient->SetFrameCallback(FrameCallback, this);
+
+		if (!m_streamingClient->StartClient("127.0.0.1", 27015))
+		{
+			Shutdown();
+			return false;
+		}
+
 		m_running = true;
 		return true;
 	}
@@ -130,6 +147,13 @@ public:
 	{
 		m_running = false;
 
+		if (m_streamingClient)
+		{
+			m_streamingClient->StopClient();
+			delete m_streamingClient;
+			m_streamingClient = nullptr;
+		}
+
 		if (m_imageView)
 		{
 			delete m_imageView;
@@ -151,6 +175,59 @@ public:
 	}
 
 private:
+	static void StreamInfoCallback(const DesktopStreamClientSessionContext& streamContext, void* userData)
+	{
+		DesktopStreamingClientApp* self = static_cast<DesktopStreamingClientApp*>(userData);
+		if (self)
+		{
+			self->OnStreamInfo(streamContext);
+		}
+	}
+
+	static void FrameCallback(const uint8_t* frameData, uint32_t frameSize, uint64_t frameId, uint64_t timestamp, uint16_t frameType, void* userData)
+	{
+		DesktopStreamingClientApp* self = static_cast<DesktopStreamingClientApp*>(userData);
+		if (self)
+		{
+			self->OnEncodedFrame(frameData, frameSize, frameId, timestamp, frameType);
+		}
+	}
+
+	void OnStreamInfo(const DesktopStreamClientSessionContext& streamContext)
+	{
+		printf_s(
+			"Stream info: streamId=%u, %ux%u, codec=%u, infoVersion=%u, codecConfigVersion=%u\n",
+			streamContext.streamId,
+			streamContext.width,
+			streamContext.height,
+			streamContext.codecType,
+			streamContext.streamInfoVersion,
+			streamContext.codecConfigVersion);
+	}
+
+	void OnEncodedFrame(const uint8_t* frameData, uint32_t frameSize, uint64_t frameId, uint64_t timestamp, uint16_t frameType)
+	{
+		if (!m_nvDecoder || !m_imageView || !frameData || frameSize == 0)
+			return;
+
+		if (!m_nvDecoder->Parse(frameData, frameSize, true, false, false))
+		{
+			return;
+		}
+
+		if (D3D11NvDecoder::Frame* frame = m_nvDecoder->GetFrame())
+		{
+			if (frame->sharedHandle)
+			{
+				m_imageView->UpdateSharedTexture(frame->sharedHandle);
+			}
+			else if (frame->texture)
+			{
+				m_imageView->UpdateTexture(frame->texture);
+			}
+		}
+	}
+
 	static void FrameCallbackThunk(void* userData)
 	{
 		//CaptureCallbackContext* context = static_cast<CaptureCallbackContext*>(userData);
@@ -197,4 +274,5 @@ private:
 	D3D11RenderEngine* m_D3D11Engine = nullptr;
 	D3D11NvDecoder* m_nvDecoder = nullptr;
 	D3D11ImageView* m_imageView = nullptr;
+	StreamingClient* m_streamingClient = nullptr;
 };
