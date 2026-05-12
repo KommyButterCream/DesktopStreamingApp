@@ -17,7 +17,6 @@
 
 #include <cstring>
 #include <new>
-#include <vector>
 
 using namespace Core::Util;
 
@@ -84,8 +83,8 @@ bool StreamingServer::BroadcastEncodedFrame(const uint8_t* encodedData, uint32_t
 		return false;
 	}
 
-	std::vector<ClientSession*> viewers(m_viewerCapacity);
-	const uint32_t viewerCount = SnapshotSubscribedViewers(viewers.data(), m_viewerCapacity);
+	ClientSession** viewers = nullptr;
+	const uint32_t viewerCount = GetSubscribedViewerSnapshot(&viewers);
 	if (viewerCount == 0)
 		return true;
 
@@ -345,16 +344,41 @@ void StreamingServer::ReleaseSharedStreamPacket(SharedStreamPacket* sharedPacket
 	delete sharedPacket;
 }
 
-uint32_t StreamingServer::SnapshotSubscribedViewers(ClientSession** viewers, uint32_t capacity) const
+uint32_t StreamingServer::GetSubscribedViewerSnapshot(ClientSession*** viewers)
 {
-	if (!viewers || capacity == 0 || !m_viewers)
+	if (!viewers || !m_subscribedViewerSnapshot)
 		return 0;
+
+	if (::InterlockedCompareExchange(&m_viewerSnapshotDirty, FALSE, FALSE) != FALSE)
+	{
+		RebuildSubscribedViewerSnapshot();
+	}
+
+	*viewers = m_subscribedViewerSnapshot;
+	return m_subscribedViewerSnapshotCount;
+}
+
+void StreamingServer::MarkViewerSnapshotDirty()
+{
+	::InterlockedExchange(&m_viewerSnapshotDirty, TRUE);
+}
+
+void StreamingServer::RebuildSubscribedViewerSnapshot()
+{
+	if (!m_subscribedViewerSnapshot || !m_viewers)
+		return;
+
+	::AcquireSRWLockExclusive(&m_viewerLock);
+
+	if (::InterlockedCompareExchange(&m_viewerSnapshotDirty, FALSE, FALSE) == FALSE)
+	{
+		::ReleaseSRWLockExclusive(&m_viewerLock);
+		return;
+	}
 
 	uint32_t snapshotCount = 0;
 
-	::AcquireSRWLockShared(&m_viewerLock);
-
-	for (uint32_t index = 0; index < m_viewerCount && snapshotCount < capacity; ++index)
+	for (uint32_t index = 0; index < m_viewerCount && snapshotCount < m_viewerCapacity; ++index)
 	{
 		ClientSession* viewer = m_viewers[index];
 		if (!viewer || !viewer->IsEstablished())
@@ -364,12 +388,18 @@ uint32_t StreamingServer::SnapshotSubscribedViewers(ClientSession** viewers, uin
 		if (!streamContext || !streamContext->subscribed || streamContext->streamId != DESKTOP_STREAM_ID_PRIMARY)
 			continue;
 
-		viewers[snapshotCount++] = viewer;
+		m_subscribedViewerSnapshot[snapshotCount++] = viewer;
 	}
 
-	::ReleaseSRWLockShared(&m_viewerLock);
+	for (uint32_t index = snapshotCount; index < m_subscribedViewerSnapshotCount; ++index)
+	{
+		m_subscribedViewerSnapshot[index] = nullptr;
+	}
 
-	return snapshotCount;
+	m_subscribedViewerSnapshotCount = snapshotCount;
+	::InterlockedExchange(&m_viewerSnapshotDirty, FALSE);
+
+	::ReleaseSRWLockExclusive(&m_viewerLock);
 }
 
 bool StreamingServer::HandleUnsubscribe(ClientSession* session, uint32_t streamId)
@@ -397,8 +427,18 @@ bool StreamingServer::InitializeViewerList(uint32_t maxConnectionCount)
 	if (!m_viewers)
 		return false;
 
+	m_subscribedViewerSnapshot = new ClientSession * [maxConnectionCount] {};
+	if (!m_subscribedViewerSnapshot)
+	{
+		delete[] m_viewers;
+		m_viewers = nullptr;
+		return false;
+	}
+
 	m_viewerCapacity = maxConnectionCount;
 	m_viewerCount = 0;
+	m_subscribedViewerSnapshotCount = 0;
+	::InterlockedExchange(&m_viewerSnapshotDirty, TRUE);
 
 	return true;
 }
@@ -411,8 +451,16 @@ void StreamingServer::FinalizeViewerList()
 		m_viewers = nullptr;
 	}
 
+	if (m_subscribedViewerSnapshot)
+	{
+		delete[] m_subscribedViewerSnapshot;
+		m_subscribedViewerSnapshot = nullptr;
+	}
+
 	m_viewerCapacity = 0;
 	m_viewerCount = 0;
+	m_subscribedViewerSnapshotCount = 0;
+	::InterlockedExchange(&m_viewerSnapshotDirty, TRUE);
 }
 
 bool StreamingServer::AddViewer(ClientSession* session)
@@ -438,6 +486,7 @@ bool StreamingServer::AddViewer(ClientSession* session)
 	}
 
 	m_viewers[m_viewerCount++] = session;
+	MarkViewerSnapshotDirty();
 	::ReleaseSRWLockExclusive(&m_viewerLock);
 	return true;
 }
@@ -461,6 +510,7 @@ void StreamingServer::RemoveViewer(ClientSession* session)
 
 		m_viewers[m_viewerCount - 1] = nullptr;
 		--m_viewerCount;
+		MarkViewerSnapshotDirty();
 		break;
 	}
 

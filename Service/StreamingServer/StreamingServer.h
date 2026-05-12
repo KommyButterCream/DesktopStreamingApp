@@ -51,12 +51,17 @@ private:
 	static void ReleaseSharedStreamPacketCallback(const void* packetData, void* context);
 	void AddRefSharedStreamPacket(SharedStreamPacket* sharedPacket);
 	void ReleaseSharedStreamPacket(SharedStreamPacket* sharedPacket);
-	uint32_t SnapshotSubscribedViewers(ClientSession** viewers, uint32_t capacity) const;
+	uint32_t GetSubscribedViewerSnapshot(ClientSession*** viewers);
+	void MarkViewerSnapshotDirty();
+	void RebuildSubscribedViewerSnapshot();
 
 private:
 	ClientSession** m_viewers = nullptr;
+	ClientSession** m_subscribedViewerSnapshot = nullptr;
 	uint32_t m_viewerCapacity = 0;
 	uint32_t m_viewerCount = 0;
+	uint32_t m_subscribedViewerSnapshotCount = 0;
+	volatile LONG m_viewerSnapshotDirty = TRUE;
 	mutable SRWLOCK m_viewerLock = SRWLOCK_INIT;
 
 	uint32_t m_streamInfoVersion = 1;
