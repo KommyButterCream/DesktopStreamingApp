@@ -12,7 +12,9 @@
 
 #include "../../../Module/D3D11Engine/Core/D3D11RenderEngine.h"
 #include "../../../Module/D3D11ImageView/D3D11ImageView/D3D11ImageView.h"
+#include "../../../Module/NvCodec/NvDecode/BitstreamRingBuffer.h"
 #include "../../../Module/NvCodec/NvDecode/D3D11NvDecoder.h"
+#include "../../../Module/NvCodec/NvDecode/DecodeThread.h"
 #include "../Service/StreamingClient/StreamingClient.h"
 
 class DesktopStreamingClientApp
@@ -78,6 +80,27 @@ public:
 		}
 
 		if (!m_imageView->Initialize(GetDesktopWindow(), RECT(0, 0, 1920, 900), windowStyle))
+		{
+			Shutdown();
+			return false;
+		}
+
+		m_bitstreamBuffer = new BitstreamRingBuffer(DESKTOP_STREAM_MAX_FRAME_SIZE, 8);
+		if (!m_bitstreamBuffer || m_bitstreamBuffer->GetBufferSize() == 0)
+		{
+			Shutdown();
+			return false;
+		}
+
+		m_decodeThread = new DecodeThread();
+		if (!m_decodeThread)
+		{
+			Shutdown();
+			return false;
+		}
+
+		m_decodeThread->SetFrameCallback(DecodedFrameCallback, this);
+		if (!m_decodeThread->Initialize(m_bitstreamBuffer, m_nvDecoder))
 		{
 			Shutdown();
 			return false;
@@ -154,6 +177,19 @@ public:
 			m_streamingClient = nullptr;
 		}
 
+		if (m_decodeThread)
+		{
+			m_decodeThread->Shutdown();
+			delete m_decodeThread;
+			m_decodeThread = nullptr;
+		}
+
+		if (m_bitstreamBuffer)
+		{
+			delete m_bitstreamBuffer;
+			m_bitstreamBuffer = nullptr;
+		}
+
 		if (m_imageView)
 		{
 			delete m_imageView;
@@ -193,6 +229,15 @@ private:
 		}
 	}
 
+	static void DecodedFrameCallback(const D3D11NvDecoder::Frame& frame, void* userData)
+	{
+		DesktopStreamingClientApp* self = static_cast<DesktopStreamingClientApp*>(userData);
+		if (self)
+		{
+			self->OnDecodedFrame(frame);
+		}
+	}
+
 	void OnStreamInfo(const DesktopStreamClientSessionContext& streamContext)
 	{
 		printf_s(
@@ -207,66 +252,28 @@ private:
 
 	void OnEncodedFrame(const uint8_t* frameData, uint32_t frameSize, uint64_t frameId, uint64_t timestamp, uint16_t frameType)
 	{
-		if (!m_nvDecoder || !m_imageView || !frameData || frameSize == 0)
+		if (!m_bitstreamBuffer || !frameData || frameSize == 0)
 			return;
 
-		if (!m_nvDecoder->Parse(frameData, frameSize, true, false, false))
+		if (!m_bitstreamBuffer->EnqueuePacket(frameData, frameSize))
 		{
 			return;
 		}
+	}
 
-		if (D3D11NvDecoder::Frame* frame = m_nvDecoder->GetFrame())
+	void OnDecodedFrame(const D3D11NvDecoder::Frame& frame)
+	{
+		if (!m_imageView)
+			return;
+
+		if (frame.sharedHandle)
 		{
-			if (frame->sharedHandle)
-			{
-				m_imageView->UpdateSharedTexture(frame->sharedHandle);
-			}
-			else if (frame->texture)
-			{
-				m_imageView->UpdateTexture(frame->texture);
-			}
+			m_imageView->UpdateSharedTexture(frame.sharedHandle);
 		}
-	}
-
-	static void FrameCallbackThunk(void* userData)
-	{
-		//CaptureCallbackContext* context = static_cast<CaptureCallbackContext*>(userData);
-		//if (!context)
-		//	return;
-
-		//DesktopStreamingClientApp* self = static_cast<DesktopStreamingClientApp*>(context->ownerData);
-		//if (self)
-		//{
-		//	self->OnFrameCallback();
-		//}
-	}
-
-	void OnFrameCallback()
-	{
-		//NvEncPacket encodeResultPacket = {};
-		//if (!encodeResultPacket.data || encodeResultPacket.size == 0)
-		//{
-		//	return;
-		//}
-
-		//if (!m_nvDecoder->Parse(encodeResultPacket.data, encodeResultPacket.size, true, false, false))
-		//{
-		//	__debugbreak();
-
-		//	return;
-		//}
-
-		//if (D3D11NvDecoder::Frame* frame = m_nvDecoder->GetFrame())
-		//{
-		//	if (m_imageView && frame->sharedHandle)
-		//	{
-		//		m_imageView->UpdateSharedTexture(frame->sharedHandle);
-		//	}
-		//	else if (m_imageView && frame->texture)
-		//	{
-		//		m_imageView->UpdateTexture(frame->texture);
-		//	}
-		//}
+		else if (frame.texture)
+		{
+			m_imageView->UpdateTexture(frame.texture);
+		}
 	}
 
 private:
@@ -274,5 +281,7 @@ private:
 	D3D11RenderEngine* m_D3D11Engine = nullptr;
 	D3D11NvDecoder* m_nvDecoder = nullptr;
 	D3D11ImageView* m_imageView = nullptr;
+	BitstreamRingBuffer* m_bitstreamBuffer = nullptr;
+	DecodeThread* m_decodeThread = nullptr;
 	StreamingClient* m_streamingClient = nullptr;
 };
