@@ -119,7 +119,7 @@ public:
 
 		//m_callbackContext.imageView = m_imageView;
 
-		uint16_t fps = 10;
+		uint16_t fps = 15;
 		m_streamingServer = new StreamingServer();
 		if (!m_streamingServer)
 		{
@@ -285,6 +285,11 @@ private:
 			return;
 		}
 
+		if (m_streamingServer && m_streamingServer->HasViewerWaitingForKeyframe())
+		{
+			m_nvEncoder->RequestKeyFrame();
+		}
+
 		if (!m_nvEncoder->DoEncode(encodeResultPacket))
 		{
 			__debugbreak();
@@ -307,7 +312,8 @@ private:
 				encodeResultPacket.size,
 				frameHandle.frameId,
 				encodeResultPacket.timestamp,
-				encodeResultPacket.frameType);
+				encodeResultPacket.frameType,
+				encodeResultPacket.isKeyFrame);
 		}
 
 		//if (!m_nvDecoder->Parse(encodeResultPacket.data, encodeResultPacket.size, true, false, false))

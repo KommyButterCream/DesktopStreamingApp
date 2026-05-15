@@ -72,7 +72,36 @@ void StreamingServer::SetStreamInfo(uint16_t width, uint16_t height, uint16_t fp
 	++m_codecConfigVersion;
 }
 
-bool StreamingServer::BroadcastEncodedFrame(const uint8_t* encodedData, uint32_t encodedSize, uint64_t frameId, uint64_t timestamp, uint16_t frameType)
+bool StreamingServer::HasViewerWaitingForKeyframe()
+{
+	if (!m_viewers || m_viewerCapacity == 0)
+		return false;
+
+	bool hasWaitingViewer = false;
+
+	::AcquireSRWLockShared(&m_viewerLock);
+	for (uint32_t index = 0; index < m_viewerCount; ++index)
+	{
+		ClientSession* viewer = m_viewers[index];
+		if (!viewer || !viewer->IsEstablished())
+			continue;
+
+		DesktopStreamServerSessionContext* streamContext = dynamic_cast<DesktopStreamServerSessionContext*>(viewer->GetSessionContext());
+		if (!streamContext || !streamContext->subscribed || streamContext->streamId != DESKTOP_STREAM_ID_PRIMARY)
+			continue;
+
+		if (streamContext->waitingForKeyframe)
+		{
+			hasWaitingViewer = true;
+			break;
+		}
+	}
+	::ReleaseSRWLockShared(&m_viewerLock);
+
+	return hasWaitingViewer;
+}
+
+bool StreamingServer::BroadcastEncodedFrame(const uint8_t* encodedData, uint32_t encodedSize, uint64_t frameId, uint64_t timestamp, uint16_t frameType, bool isKeyFrame)
 {
 	if (!encodedData || encodedSize == 0 || !m_viewers || m_viewerCapacity == 0)
 		return false;
@@ -149,6 +178,14 @@ bool StreamingServer::BroadcastEncodedFrame(const uint8_t* encodedData, uint32_t
 			if (viewer->EnqueueSharedSendPacket(framePacket, packetSize, ReleaseSharedStreamPacketCallback, sharedPacket))
 			{
 				++enqueuedCount;
+				if (isKeyFrame && chunkIndex == 0)
+				{
+					DesktopStreamServerSessionContext* streamContext = dynamic_cast<DesktopStreamServerSessionContext*>(viewer->GetSessionContext());
+					if (streamContext && streamContext->streamId == DESKTOP_STREAM_ID_PRIMARY)
+					{
+						streamContext->waitingForKeyframe = false;
+					}
+				}
 			}
 			else
 			{

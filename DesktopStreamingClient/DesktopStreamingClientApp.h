@@ -28,23 +28,22 @@ public:
 
 	bool Initialize()
 	{
-		// Rendering Engine
-		RenderEngineConfig renderEngineConfig = {};
-		renderEngineConfig.initD2D = false;
-		renderEngineConfig.initD3D = true;
+		RenderEngineConfig decoderRenderEngineConfig = {};
+		decoderRenderEngineConfig.initD2D = false;
+		decoderRenderEngineConfig.initD3D = true;
+		decoderRenderEngineConfig.initFontManager = false;
 #if defined(_DEBUG)
-		renderEngineConfig.initDebugLayer = true;
+		decoderRenderEngineConfig.initDebugLayer = true;
 #endif
-		renderEngineConfig.initFontManager = false;
-
-		m_D3D11Engine = new D3D11RenderEngine();
-		if (!m_D3D11Engine)
+		
+		m_decoderD3D11Engine = new D3D11RenderEngine();
+		if (!m_decoderD3D11Engine)
 		{
 			Shutdown();
 			return false;
 		}
 
-		if (!m_D3D11Engine->Initialize(renderEngineConfig))
+		if (!m_decoderD3D11Engine->Initialize(decoderRenderEngineConfig))
 		{
 			Shutdown();
 			return false;
@@ -65,7 +64,7 @@ public:
 			return false;
 		}
 
-		if (!m_nvDecoder->Initialize(m_D3D11Engine->GetD3DDevice(), true))
+		if (!m_nvDecoder->Initialize(m_decoderD3D11Engine->GetD3DDevice(), true))
 		{
 			Shutdown();
 			return false;
@@ -79,7 +78,7 @@ public:
 			return false;
 		}
 
-		if (!m_imageView->Initialize(GetDesktopWindow(), RECT(0, 0, 1920, 900), windowStyle))
+		if (!m_imageView->Initialize(GetDesktopWindow(), RECT(0, 0, 1920, 900), windowStyle, nullptr))
 		{
 			Shutdown();
 			return false;
@@ -203,10 +202,10 @@ public:
 			m_nvDecoder = nullptr;
 		}
 
-		if (m_D3D11Engine)
+		if (m_decoderD3D11Engine)
 		{
-			delete m_D3D11Engine;
-			m_D3D11Engine = nullptr;
+			delete m_decoderD3D11Engine;
+			m_decoderD3D11Engine = nullptr;
 		}
 	}
 
@@ -270,15 +269,11 @@ private:
 		{
 			m_imageView->UpdateSharedTexture(frame.sharedHandle);
 		}
-		else if (frame.texture)
-		{
-			m_imageView->UpdateTexture(frame.texture);
-		}
 	}
 
 private:
 	bool m_running = false;
-	D3D11RenderEngine* m_D3D11Engine = nullptr;
+	D3D11RenderEngine* m_decoderD3D11Engine = nullptr;
 	D3D11NvDecoder* m_nvDecoder = nullptr;
 	D3D11ImageView* m_imageView = nullptr;
 	BitstreamRingBuffer* m_bitstreamBuffer = nullptr;
