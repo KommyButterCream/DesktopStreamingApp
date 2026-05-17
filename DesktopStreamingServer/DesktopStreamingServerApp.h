@@ -13,7 +13,6 @@
 #include "../../../Module/D3D11Engine/Core/D3D11RenderEngine.h"
 #include "../../../Module/D3D11DuplicateEngine/D3D11DuplicateEngine/D3D11DuplicateEngine.h"
 #include "../../../Module/D3D11DuplicateEngine/D3D11DuplicateEngine/CommonTypes.h"
-//#include "../../../Module/D3D11ImageView/D3D11ImageView/D3D11ImageView.h"
 #include "../../../Module/NvCodec/NvEncode/D3D11NvEncoder.h"
 #include "../../../Module/NvCodec/NvDecode/D3D11NvDecoder.h"
 #include "../Service/StreamingServer/StreamingServer.h"
@@ -60,7 +59,7 @@ public:
 
 		m_callbackContext.sharedData = &m_sharedData;
 		m_callbackContext.ownerData = this;
-		m_callbackContext.imageView = m_imageView;
+		m_callbackContext.imageView = nullptr;
 		m_callbackContext.D3D11Device = m_D3D11Engine->GetD3DDevice();
 
 		if (!m_duplicateEngine->Initialize(m_D3D11Engine, 0))
@@ -103,23 +102,7 @@ public:
 			return false;
 		}
 
-		//DWORD windowStyle = WS_VISIBLE | WS_OVERLAPPEDWINDOW;
-		//m_imageView = new D3D11ImageView();
-		//if (!m_imageView)
-		//{
-		//	Shutdown();
-		//	return false;
-		//}
-
-		//if (!m_imageView->Initialize(GetDesktopWindow(), RECT(0, 0, 1920, 900), windowStyle))
-		//{
-		//	Shutdown();
-		//	return false;
-		//}
-
-		//m_callbackContext.imageView = m_imageView;
-
-		uint16_t fps = 15;
+		uint16_t fps = 1;
 		m_streamingServer = new StreamingServer();
 		if (!m_streamingServer)
 		{
@@ -135,7 +118,7 @@ public:
 		}
 
 		m_duplicateEngine->SetTargetFps(fps);
-		m_duplicateEngine->SetFrameCaptureCallback(FrameCallbackThunk, &m_callbackContext);
+		m_duplicateEngine->SetFrameCaptureCallback(FrameCallback, &m_callbackContext);
 
 		if (!m_duplicateEngine->StartThread())
 		{
@@ -205,12 +188,6 @@ public:
 			m_streamingServer = nullptr;
 		}
 
-		//if (m_imageView)
-		//{
-		//	delete m_imageView;
-		//	m_imageView = nullptr;
-		//}
-
 		if (m_nvDecoder)
 		{
 			m_nvDecoder->Destroy();
@@ -248,7 +225,7 @@ public:
 	}
 
 private:
-	static void FrameCallbackThunk(void* userData)
+	static void FrameCallback(void* userData)
 	{
 		CaptureCallbackContext* context = static_cast<CaptureCallbackContext*>(userData);
 		if (!context)
@@ -316,27 +293,6 @@ private:
 				encodeResultPacket.isKeyFrame);
 		}
 
-		//if (!m_nvDecoder->Parse(encodeResultPacket.data, encodeResultPacket.size, true, false, false))
-		//{
-		//	__debugbreak();
-
-		//	m_duplicateEngine->ReleaseLatestFrameHandle(frameHandle);
-
-		//	return;
-		//}
-
-		//if (D3D11NvDecoder::Frame* frame = m_nvDecoder->GetFrame())
-		//{
-		//	if (m_imageView && frame->sharedHandle)
-		//	{
-		//		m_imageView->UpdateSharedTexture(frame->sharedHandle);
-		//	}
-		//	else if (m_imageView && frame->texture)
-		//	{
-		//		m_imageView->UpdateTexture(frame->texture);
-		//	}
-		//}
-		
 		m_duplicateEngine->ReleaseLatestFrameHandle(frameHandle);
 	}
 
@@ -348,6 +304,5 @@ private:
 	D3D11DuplicateEngine* m_duplicateEngine = nullptr;
 	D3D11NvEncoder* m_nvEncoder = nullptr;
 	D3D11NvDecoder* m_nvDecoder = nullptr;
-	D3D11ImageView* m_imageView = nullptr;
 	StreamingServer* m_streamingServer = nullptr;
 };
