@@ -72,6 +72,12 @@ void StreamingServer::SetStreamInfo(uint16_t width, uint16_t height, uint16_t fp
 	++m_codecConfigVersion;
 }
 
+bool StreamingServer::HasSubscribedViewer()
+{
+	ClientSession** viewers = nullptr;
+	return GetSubscribedViewerSnapshot(&viewers) > 0;
+}
+
 bool StreamingServer::HasViewerWaitingForKeyframe()
 {
 	if (!m_viewers || m_viewerCapacity == 0)
@@ -174,17 +180,20 @@ bool StreamingServer::BroadcastEncodedFrame(const uint8_t* encodedData, uint32_t
 			if (!viewer)
 				continue;
 
+			DesktopStreamServerSessionContext* streamContext = dynamic_cast<DesktopStreamServerSessionContext*>(viewer->GetSessionContext());
+			if (!streamContext || streamContext->streamId != DESKTOP_STREAM_ID_PRIMARY)
+				continue;
+
+			if (streamContext->waitingForKeyframe && !isKeyFrame)
+				continue;
+
 			AddRefSharedStreamPacket(sharedPacket);
 			if (viewer->EnqueueSharedSendPacket(framePacket, packetSize, ReleaseSharedStreamPacketCallback, sharedPacket))
 			{
 				++enqueuedCount;
 				if (isKeyFrame && chunkIndex == 0)
 				{
-					DesktopStreamServerSessionContext* streamContext = dynamic_cast<DesktopStreamServerSessionContext*>(viewer->GetSessionContext());
-					if (streamContext && streamContext->streamId == DESKTOP_STREAM_ID_PRIMARY)
-					{
-						streamContext->waitingForKeyframe = false;
-					}
+					streamContext->waitingForKeyframe = false;
 				}
 			}
 			else

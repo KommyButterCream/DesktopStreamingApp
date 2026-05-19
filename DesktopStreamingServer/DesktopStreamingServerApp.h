@@ -4,6 +4,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
+#include <d3d11_4.h>
 #include <objbase.h>
 
 #include <string>
@@ -14,7 +15,8 @@
 #include "../../../Module/D3D11DuplicateEngine/D3D11DuplicateEngine/D3D11DuplicateEngine.h"
 #include "../../../Module/D3D11DuplicateEngine/D3D11DuplicateEngine/CommonTypes.h"
 #include "../../../Module/NvCodec/NvEncode/D3D11NvEncoder.h"
-#include "../../../Module/NvCodec/NvDecode/D3D11NvDecoder.h"
+#include "../../../Module/NvCodec/NvEncode/EncodeFrameQueue.h"
+#include "../../../Module/NvCodec/NvEncode/EncodeThread.h"
 #include "../Service/StreamingServer/StreamingServer.h"
 
 class DesktopStreamingServerApp
@@ -49,6 +51,8 @@ public:
 			Shutdown();
 			return false;
 		}
+
+		EnableD3D11MultithreadProtection();
 
 		m_duplicateEngine = new D3D11DuplicateEngine();
 		if (!m_duplicateEngine)
@@ -89,20 +93,7 @@ public:
 			return false;
 		}
 
-		m_nvDecoder = new D3D11NvDecoder();
-		if (!m_nvDecoder)
-		{
-			Shutdown();
-			return false;
-		}
-
-		if (!m_nvDecoder->Initialize(m_D3D11Engine->GetD3DDevice(), true))
-		{
-			Shutdown();
-			return false;
-		}
-
-		uint16_t fps = 1;
+		uint16_t fps = 30;
 		m_streamingServer = new StreamingServer();
 		if (!m_streamingServer)
 		{
@@ -112,6 +103,34 @@ public:
 
 		m_streamingServer->SetStreamInfo(static_cast<uint16_t>(outputWidth), static_cast<uint16_t>(outputHeight), fps, DESKTOP_STREAM_CODEC_TYPE::H264);
 		if (!m_streamingServer->StartServer("0.0.0.0", 27015, 64))
+		{
+			Shutdown();
+			return false;
+		}
+
+		m_encodeFrameQueue = new EncodeFrameQueue();
+		if (!m_encodeFrameQueue)
+		{
+			Shutdown();
+			return false;
+		}
+
+		if (!m_encodeFrameQueue->Initialize(4, ReleaseCapturedFrameHandleCallback, this))
+		{
+			Shutdown();
+			return false;
+		}
+
+		m_encodeThread = new EncodeThread();
+		if (!m_encodeThread)
+		{
+			Shutdown();
+			return false;
+		}
+
+		m_encodeThread->SetKeyFrameRequestCallback(KeyFrameRequestCallback, this);
+		m_encodeThread->SetEncodedFrameCallback(EncodedFrameCallback, this);
+		if (!m_encodeThread->Initialize(m_encodeFrameQueue, m_nvEncoder))
 		{
 			Shutdown();
 			return false;
@@ -176,9 +195,20 @@ public:
 
 		if (m_duplicateEngine)
 		{
-			m_duplicateEngine->Shutdown();
-			delete m_duplicateEngine;
-			m_duplicateEngine = nullptr;
+			m_duplicateEngine->StopThread();
+		}
+
+		if (m_encodeThread)
+		{
+			m_encodeThread->Shutdown();
+			delete m_encodeThread;
+			m_encodeThread = nullptr;
+		}
+
+		if (m_encodeFrameQueue)
+		{
+			delete m_encodeFrameQueue;
+			m_encodeFrameQueue = nullptr;
 		}
 
 		if (m_streamingServer)
@@ -188,11 +218,11 @@ public:
 			m_streamingServer = nullptr;
 		}
 
-		if (m_nvDecoder)
+		if (m_duplicateEngine)
 		{
-			m_nvDecoder->Destroy();
-			delete m_nvDecoder;
-			m_nvDecoder = nullptr;
+			m_duplicateEngine->Shutdown();
+			delete m_duplicateEngine;
+			m_duplicateEngine = nullptr;
 		}
 
 		if (m_nvEncoder)
@@ -238,62 +268,105 @@ private:
 		}
 	}
 
+	static void ReleaseCapturedFrameHandleCallback(EncodeFrameQueue::InputFrameHandle& frameHandle, void* userData)
+	{
+		DesktopStreamingServerApp* self = static_cast<DesktopStreamingServerApp*>(userData);
+		if (self)
+		{
+			self->ReleaseCapturedFrameHandle(frameHandle);
+		}
+	}
+
+	static bool KeyFrameRequestCallback(void* userData)
+	{
+		DesktopStreamingServerApp* self = static_cast<DesktopStreamingServerApp*>(userData);
+		return self ? self->HasViewerWaitingForKeyframe() : false;
+	}
+
+	static void EncodedFrameCallback(const EncodeThread::EncodedFrame& frame, void* userData)
+	{
+		DesktopStreamingServerApp* self = static_cast<DesktopStreamingServerApp*>(userData);
+		if (self)
+		{
+			self->OnEncodedFrame(frame);
+		}
+	}
+
 	void OnFrameCallback()
 	{
-		if (!m_callbackContext.sharedData)
+		if (!m_callbackContext.sharedData || !m_duplicateEngine || !m_encodeFrameQueue || !m_streamingServer)
+			return;
+
+		if (!m_streamingServer->HasSubscribedViewer())
 			return;
 
 		CapturedFrameHandle frameHandle = m_duplicateEngine->GetLatestFrameHandle();
-
-		printf_s("Slot ID : %d, Frame ID : %llu\n", frameHandle.slotId, frameHandle.frameId);
 
 		if (!frameHandle.texture)
 		{
 			return;
 		}
 
-		NvEncPacket encodeResultPacket = {};
-		if (!m_nvEncoder->PrepareFrameForEncode(frameHandle.texture))
-		{
-			__debugbreak();
+		EncodeFrameQueue::InputFrameHandle encodeFrameHandle = {};
+		encodeFrameHandle.texture = frameHandle.texture;
+		encodeFrameHandle.sourceSlotId = frameHandle.slotId;
+		encodeFrameHandle.frameId = frameHandle.frameId;
 
-			m_duplicateEngine->ReleaseLatestFrameHandle(frameHandle);
-			
-			return;
-		}
-
-		if (m_streamingServer && m_streamingServer->HasViewerWaitingForKeyframe())
-		{
-			m_nvEncoder->RequestKeyFrame();
-		}
-
-		if (!m_nvEncoder->DoEncode(encodeResultPacket))
-		{
-			__debugbreak();
-			
-			m_duplicateEngine->ReleaseLatestFrameHandle(frameHandle);
-			
-			return;
-		}
-
-		if (!encodeResultPacket.data || encodeResultPacket.size == 0)
+		const bool forceKeyFrame = m_streamingServer->HasViewerWaitingForKeyframe();
+		if (!m_encodeFrameQueue->EnqueueLatest(encodeFrameHandle, forceKeyFrame))
 		{
 			m_duplicateEngine->ReleaseLatestFrameHandle(frameHandle);
 			return;
 		}
+	}
 
-		if (m_streamingServer)
+	void ReleaseCapturedFrameHandle(EncodeFrameQueue::InputFrameHandle& frameHandle)
+	{
+		if (m_duplicateEngine)
 		{
-			m_streamingServer->BroadcastEncodedFrame(
-				encodeResultPacket.data,
-				encodeResultPacket.size,
-				frameHandle.frameId,
-				encodeResultPacket.timestamp,
-				encodeResultPacket.frameType,
-				encodeResultPacket.isKeyFrame);
-		}
+			CapturedFrameHandle capturedFrameHandle = {};
+			capturedFrameHandle.texture = frameHandle.texture;
+			capturedFrameHandle.slotId = static_cast<LONG>(frameHandle.sourceSlotId);
+			capturedFrameHandle.frameId = frameHandle.frameId;
 
-		m_duplicateEngine->ReleaseLatestFrameHandle(frameHandle);
+			m_duplicateEngine->ReleaseLatestFrameHandle(capturedFrameHandle);
+
+			frameHandle.texture = nullptr;
+			frameHandle.sourceSlotId = -1;
+			frameHandle.frameId = 0ULL;
+		}
+	}
+
+	bool HasViewerWaitingForKeyframe()
+	{
+		return m_streamingServer && m_streamingServer->HasViewerWaitingForKeyframe();
+	}
+
+	void OnEncodedFrame(const EncodeThread::EncodedFrame& frame)
+	{
+		if (!m_streamingServer || !frame.data || frame.size == 0)
+			return;
+
+		m_streamingServer->BroadcastEncodedFrame(
+			frame.data,
+			frame.size,
+			frame.frameId,
+			frame.timestamp,
+			frame.frameType,
+			frame.isKeyFrame);
+	}
+
+	void EnableD3D11MultithreadProtection()
+	{
+		if (!m_D3D11Engine || !m_D3D11Engine->GetD3DDeviceContext())
+			return;
+
+		ID3D11Multithread* multithread = nullptr;
+		if (SUCCEEDED(m_D3D11Engine->GetD3DDeviceContext()->QueryInterface(__uuidof(ID3D11Multithread), reinterpret_cast<void**>(&multithread))) && multithread)
+		{
+			multithread->SetMultithreadProtected(TRUE);
+			multithread->Release();
+		}
 	}
 
 private:
@@ -303,6 +376,7 @@ private:
 	D3D11RenderEngine* m_D3D11Engine = nullptr;
 	D3D11DuplicateEngine* m_duplicateEngine = nullptr;
 	D3D11NvEncoder* m_nvEncoder = nullptr;
-	D3D11NvDecoder* m_nvDecoder = nullptr;
 	StreamingServer* m_streamingServer = nullptr;
+	EncodeFrameQueue* m_encodeFrameQueue = nullptr;
+	EncodeThread* m_encodeThread = nullptr;
 };

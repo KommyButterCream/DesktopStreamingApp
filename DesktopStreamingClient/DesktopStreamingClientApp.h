@@ -12,7 +12,7 @@
 
 #include "../../../Module/D3D11Engine/Core/D3D11RenderEngine.h"
 #include "../../../Module/D3D11ImageView/D3D11ImageView/D3D11ImageView.h"
-#include "../../../Module/NvCodec/NvDecode/BitstreamRingBuffer.h"
+#include "../../../Module/NvCodec/NvDecode/DecodeFrameQueue.h"
 #include "../../../Module/NvCodec/NvDecode/D3D11NvDecoder.h"
 #include "../../../Module/NvCodec/NvDecode/DecodeThread.h"
 #include "../Service/StreamingClient/StreamingClient.h"
@@ -84,8 +84,8 @@ public:
 			return false;
 		}
 
-		m_bitstreamBuffer = new BitstreamRingBuffer(DESKTOP_STREAM_MAX_FRAME_SIZE, 8);
-		if (!m_bitstreamBuffer || m_bitstreamBuffer->GetBufferSize() == 0)
+		m_decodeFrameQueue = new DecodeFrameQueue(DESKTOP_STREAM_MAX_FRAME_SIZE, 8);
+		if (!m_decodeFrameQueue || m_decodeFrameQueue->GetBufferSize() == 0)
 		{
 			Shutdown();
 			return false;
@@ -99,7 +99,7 @@ public:
 		}
 
 		m_decodeThread->SetFrameCallback(DecodedFrameCallback, this);
-		if (!m_decodeThread->Initialize(m_bitstreamBuffer, m_nvDecoder))
+		if (!m_decodeThread->Initialize(m_decodeFrameQueue, m_nvDecoder))
 		{
 			Shutdown();
 			return false;
@@ -183,10 +183,10 @@ public:
 			m_decodeThread = nullptr;
 		}
 
-		if (m_bitstreamBuffer)
+		if (m_decodeFrameQueue)
 		{
-			delete m_bitstreamBuffer;
-			m_bitstreamBuffer = nullptr;
+			delete m_decodeFrameQueue;
+			m_decodeFrameQueue = nullptr;
 		}
 
 		if (m_imageView)
@@ -251,10 +251,17 @@ private:
 
 	void OnEncodedFrame(const uint8_t* frameData, uint32_t frameSize, uint64_t frameId, uint64_t timestamp, uint16_t frameType)
 	{
-		if (!m_bitstreamBuffer || !frameData || frameSize == 0)
+		if (!m_decodeFrameQueue || !frameData || frameSize == 0)
 			return;
 
-		if (!m_bitstreamBuffer->EnqueuePacket(frameData, frameSize))
+		DecodeFrameQueue::InputFrameHandle frameHandle = {};
+		frameHandle.data = frameData;
+		frameHandle.size = frameSize;
+		frameHandle.frameId = frameId;
+		frameHandle.timestamp = timestamp;
+		frameHandle.frameType = frameType;
+
+		if (!m_decodeFrameQueue->EnqueueFrame(frameHandle))
 		{
 			return;
 		}
@@ -276,7 +283,7 @@ private:
 	D3D11RenderEngine* m_D3D11Engine = nullptr;
 	D3D11NvDecoder* m_nvDecoder = nullptr;
 	D3D11ImageView* m_imageView = nullptr;
-	BitstreamRingBuffer* m_bitstreamBuffer = nullptr;
+	DecodeFrameQueue* m_decodeFrameQueue = nullptr;
 	DecodeThread* m_decodeThread = nullptr;
 	StreamingClient* m_streamingClient = nullptr;
 };

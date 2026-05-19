@@ -21,6 +21,7 @@ public:
 	bool StartServer(const char* ipAddress, const uint16_t port, const uint32_t maxConnectionCount);
 	void StopServer();
 	void SetStreamInfo(uint16_t width, uint16_t height, uint16_t fps, DESKTOP_STREAM_CODEC_TYPE codecType);
+	bool HasSubscribedViewer();
 	bool HasViewerWaitingForKeyframe();
 	bool BroadcastEncodedFrame(const uint8_t* encodedData, uint32_t encodedSize, uint64_t frameId, uint64_t timestamp, uint16_t frameType, bool isKeyFrame);
 

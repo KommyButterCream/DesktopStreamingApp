@@ -6,7 +6,6 @@
 
 constexpr uint32_t DESKTOP_STREAM_ID_PRIMARY = 1;
 constexpr uint32_t DESKTOP_STREAM_MAX_FRAME_SIZE = 512 * 1024;
-constexpr uint32_t DESKTOP_STREAM_FAKE_FRAME_SIZE = 70 * 1024;
 
 enum class DESKTOP_STREAM_CODEC_TYPE : uint16_t
 {
