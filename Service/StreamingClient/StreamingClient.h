@@ -42,7 +42,6 @@ private:
 	bool EnqueueSendPacket(void** packetData, uint32_t packetSize);
 
 private:
-	uint32_t m_requestSequence;
 	StreamInfoCallback m_streamInfoCallback = nullptr;
 	void* m_streamInfoCallbackUserData = nullptr;
 	FrameCallback m_frameCallback = nullptr;

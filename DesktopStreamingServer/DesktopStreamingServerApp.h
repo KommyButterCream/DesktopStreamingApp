@@ -46,13 +46,17 @@ public:
 			return false;
 		}
 
-		if (!m_D3D11Engine->Initialize(renderEngineConfig))
+		if (!m_D3D11Engine->SetImmediateContextGateEnabled(true))
 		{
 			Shutdown();
 			return false;
 		}
 
-		EnableD3D11MultithreadProtection();
+		if (!m_D3D11Engine->Initialize(renderEngineConfig))
+		{
+			Shutdown();
+			return false;
+		}
 
 		m_duplicateEngine = new D3D11DuplicateEngine();
 		if (!m_duplicateEngine)
@@ -61,12 +65,11 @@ public:
 			return false;
 		}
 
-		m_callbackContext.sharedData = &m_sharedData;
-		m_callbackContext.ownerData = this;
-		m_callbackContext.imageView = nullptr;
-		m_callbackContext.D3D11Device = m_D3D11Engine->GetD3DDevice();
-
-		if (!m_duplicateEngine->Initialize(m_D3D11Engine, 0))
+		// Capture and encode copies are submitted to the same immediate context.
+		// GPU command ordering and capture-slot references make a CPU-side event
+		// query wait unnecessary in this configuration.
+		if (!m_duplicateEngine->SetWaitForFrameCopyCompletion(false) ||
+			!m_duplicateEngine->Initialize(m_D3D11Engine, 0))
 		{
 			Shutdown();
 			return false;
@@ -87,7 +90,12 @@ public:
 			return false;
 		}
 
-		if (!m_nvEncoder->Initialize(m_D3D11Engine->GetD3DDevice(), outputWidth, outputHeight, 4))
+		if (!m_nvEncoder->Initialize(
+			m_D3D11Engine->GetD3DDevice(),
+			outputWidth,
+			outputHeight,
+			4,
+			m_D3D11Engine->GetImmediateContextGate()))
 		{
 			Shutdown();
 			return false;
@@ -137,7 +145,7 @@ public:
 		}
 
 		m_duplicateEngine->SetTargetFps(fps);
-		m_duplicateEngine->SetFrameCaptureCallback(FrameCallback, &m_callbackContext);
+		m_duplicateEngine->SetFrameCaptureCallback(FrameCallback, this);
 
 		if (!m_duplicateEngine->StartThread())
 		{
@@ -193,16 +201,16 @@ public:
 	{
 		m_running = false;
 
-		if (m_duplicateEngine)
-		{
-			m_duplicateEngine->StopThread();
-		}
-
 		if (m_encodeThread)
 		{
 			m_encodeThread->Shutdown();
 			delete m_encodeThread;
 			m_encodeThread = nullptr;
+		}
+
+		if (m_duplicateEngine)
+		{
+			m_duplicateEngine->StopThread();
 		}
 
 		if (m_encodeFrameQueue)
@@ -232,36 +240,18 @@ public:
 			m_nvEncoder = nullptr;
 		}
 
-		if (m_callbackContext.opendTexture)
-		{
-			m_callbackContext.opendTexture->Release();
-			m_callbackContext.opendTexture = nullptr;
-		}
-
-		if (m_callbackContext.stagingTex)
-		{
-			m_callbackContext.stagingTex->Release();
-			m_callbackContext.stagingTex = nullptr;
-		}
-
 		if (m_D3D11Engine)
 		{
 			delete m_D3D11Engine;
 			m_D3D11Engine = nullptr;
 		}
 
-		ZeroMemory(&m_sharedData, sizeof(m_sharedData));
-		ZeroMemory(&m_callbackContext, sizeof(m_callbackContext));
 	}
 
 private:
 	static void FrameCallback(void* userData)
 	{
-		CaptureCallbackContext* context = static_cast<CaptureCallbackContext*>(userData);
-		if (!context)
-			return;
-
-		DesktopStreamingServerApp* self = static_cast<DesktopStreamingServerApp*>(context->ownerData);
+		DesktopStreamingServerApp* self = static_cast<DesktopStreamingServerApp*>(userData);
 		if (self)
 		{
 			self->OnFrameCallback();
@@ -294,7 +284,7 @@ private:
 
 	void OnFrameCallback()
 	{
-		if (!m_callbackContext.sharedData || !m_duplicateEngine || !m_encodeFrameQueue || !m_streamingServer)
+		if (!m_duplicateEngine || !m_encodeFrameQueue || !m_streamingServer)
 			return;
 
 		if (!m_streamingServer->HasSubscribedViewer())
@@ -356,23 +346,8 @@ private:
 			frame.isKeyFrame);
 	}
 
-	void EnableD3D11MultithreadProtection()
-	{
-		if (!m_D3D11Engine || !m_D3D11Engine->GetD3DDeviceContext())
-			return;
-
-		ID3D11Multithread* multithread = nullptr;
-		if (SUCCEEDED(m_D3D11Engine->GetD3DDeviceContext()->QueryInterface(__uuidof(ID3D11Multithread), reinterpret_cast<void**>(&multithread))) && multithread)
-		{
-			multithread->SetMultithreadProtected(TRUE);
-			multithread->Release();
-		}
-	}
-
 private:
 	bool m_running = false;
-	SharedCaptureData m_sharedData = {};
-	CaptureCallbackContext m_callbackContext = {};
 	D3D11RenderEngine* m_D3D11Engine = nullptr;
 	D3D11DuplicateEngine* m_duplicateEngine = nullptr;
 	D3D11NvEncoder* m_nvEncoder = nullptr;

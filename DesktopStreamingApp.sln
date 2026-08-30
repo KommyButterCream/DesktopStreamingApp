@@ -29,6 +29,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "D3D11EngineInterface", "D3D
 	ProjectSection(SolutionItems) = preProject
 		..\..\Module\D3D11EngineInterface\D3D11EngineInterfaceAPI.h = ..\..\Module\D3D11EngineInterface\D3D11EngineInterfaceAPI.h
 		..\..\Module\D3D11EngineInterface\IDeviceEventListener.h = ..\..\Module\D3D11EngineInterface\IDeviceEventListener.h
+		..\..\Module\D3D11EngineInterface\ID3D11ImmediateContextGate.h = ..\..\Module\D3D11EngineInterface\ID3D11ImmediateContextGate.h
 		..\..\Module\D3D11EngineInterface\IOverlayRenderer.h = ..\..\Module\D3D11EngineInterface\IOverlayRenderer.h
 		..\..\Module\D3D11EngineInterface\IRenderContext.h = ..\..\Module\D3D11EngineInterface\IRenderContext.h
 		..\..\Module\D3D11EngineInterface\IRenderEngine.h = ..\..\Module\D3D11EngineInterface\IRenderEngine.h

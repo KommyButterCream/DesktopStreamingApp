@@ -14,10 +14,7 @@
 
 #include "ClientPacketHandler.h"
 
-StreamingClient::StreamingClient()
-	: m_requestSequence(0)
-{
-}
+StreamingClient::StreamingClient() = default;
 
 StreamingClient::~StreamingClient()
 {

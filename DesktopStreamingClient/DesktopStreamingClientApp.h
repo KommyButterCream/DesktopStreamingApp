@@ -45,6 +45,7 @@ public:
 
 		if (!m_D3D11Engine->Initialize(renderEngineConfig))
 		{
+			printf_s("[DesktopStreamingClient] Failed to initialize D3D11RenderEngine.\n");
 			Shutdown();
 			return false;
 		}
@@ -66,6 +67,7 @@ public:
 
 		if (!m_nvDecoder->Initialize(m_D3D11Engine->GetD3DDevice(), true))
 		{
+			printf_s("[DesktopStreamingClient] Failed to initialize D3D11NvDecoder.\n");
 			Shutdown();
 			return false;
 		}
@@ -80,6 +82,7 @@ public:
 
 		if (!m_imageView->Initialize(GetDesktopWindow(), RECT(0, 0, 1920, 900), windowStyle, nullptr))
 		{
+			printf_s("[DesktopStreamingClient] Failed to initialize D3D11ImageView.\n");
 			Shutdown();
 			return false;
 		}
@@ -87,6 +90,7 @@ public:
 		m_decodeFrameQueue = new DecodeFrameQueue(DESKTOP_STREAM_MAX_FRAME_SIZE, 8);
 		if (!m_decodeFrameQueue || m_decodeFrameQueue->GetBufferSize() == 0)
 		{
+			printf_s("[DesktopStreamingClient] Failed to initialize DecodeFrameQueue.\n");
 			Shutdown();
 			return false;
 		}
@@ -101,6 +105,7 @@ public:
 		m_decodeThread->SetFrameCallback(DecodedFrameCallback, this);
 		if (!m_decodeThread->Initialize(m_decodeFrameQueue, m_nvDecoder))
 		{
+			printf_s("[DesktopStreamingClient] Failed to initialize DecodeThread.\n");
 			Shutdown();
 			return false;
 		}
@@ -117,6 +122,7 @@ public:
 
 		if (!m_streamingClient->StartClient("127.0.0.1", 27015))
 		{
+			printf_s("[DesktopStreamingClient] Failed to connect to 127.0.0.1:27015.\n");
 			Shutdown();
 			return false;
 		}
