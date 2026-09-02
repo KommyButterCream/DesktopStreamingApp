@@ -14,7 +14,6 @@
 #include "../../../Module/D3D11ImageView/D3D11ImageView/D3D11ImageView.h"
 #include "../../../Module/NvCodec/NvDecode/DecodeFrameQueue.h"
 #include "../../../Module/NvCodec/NvDecode/D3D11NvDecoder.h"
-#include "../../../Module/NvCodec/NvDecode/DecodeThread.h"
 #include "../Service/StreamingClient/StreamingClient.h"
 
 class DesktopStreamingClientApp
@@ -65,7 +64,11 @@ public:
 			return false;
 		}
 
-		if (!m_nvDecoder->Initialize(m_D3D11Engine->GetD3DDevice(), true))
+		// contextGate = nullptr: 이 엔진의 immediate context 를 쓰는 주체는
+		// 디코더 하나뿐이다. ImageView 는 자기 엔진을 따로 만들고(아래 Initialize 의
+		// D3D11Engine 인자가 nullptr), 디코딩 결과는 shared handle 로 건네받는다.
+		// 세 번째 인자는 그 shared output texture 모드를 켜는 것이다.
+		if (!m_nvDecoder->Initialize(m_D3D11Engine->GetD3DDevice(), nullptr, true))
 		{
 			printf_s("[DesktopStreamingClient] Failed to initialize D3D11NvDecoder.\n");
 			Shutdown();
@@ -95,17 +98,12 @@ public:
 			return false;
 		}
 
-		m_decodeThread = new DecodeThread();
-		if (!m_decodeThread)
+		// 디코드 워커는 이제 디코더가 소유한다. 앱이 DecodeThread 를 직접
+		// 만들지 않고 StartDecodeThread 로 맡긴다.
+		m_nvDecoder->SetFrameCallback(DecodedFrameCallback, this);
+		if (!m_nvDecoder->StartDecodeThread(m_decodeFrameQueue))
 		{
-			Shutdown();
-			return false;
-		}
-
-		m_decodeThread->SetFrameCallback(DecodedFrameCallback, this);
-		if (!m_decodeThread->Initialize(m_decodeFrameQueue, m_nvDecoder))
-		{
-			printf_s("[DesktopStreamingClient] Failed to initialize DecodeThread.\n");
+			printf_s("[DesktopStreamingClient] Failed to start the decode thread.\n");
 			Shutdown();
 			return false;
 		}
@@ -182,11 +180,10 @@ public:
 			m_streamingClient = nullptr;
 		}
 
-		if (m_decodeThread)
+		// 워커가 큐를 참조하므로 큐를 지우기 전에 반드시 멈춘다.
+		if (m_nvDecoder)
 		{
-			m_decodeThread->Shutdown();
-			delete m_decodeThread;
-			m_decodeThread = nullptr;
+			m_nvDecoder->StopDecodeThread();
 		}
 
 		if (m_decodeFrameQueue)
@@ -290,6 +287,5 @@ private:
 	D3D11NvDecoder* m_nvDecoder = nullptr;
 	D3D11ImageView* m_imageView = nullptr;
 	DecodeFrameQueue* m_decodeFrameQueue = nullptr;
-	DecodeThread* m_decodeThread = nullptr;
 	StreamingClient* m_streamingClient = nullptr;
 };

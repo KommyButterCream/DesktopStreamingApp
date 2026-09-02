@@ -16,7 +16,6 @@
 #include "../../../Module/D3D11DuplicateEngine/D3D11DuplicateEngine/CommonTypes.h"
 #include "../../../Module/NvCodec/NvEncode/D3D11NvEncoder.h"
 #include "../../../Module/NvCodec/NvEncode/EncodeFrameQueue.h"
-#include "../../../Module/NvCodec/NvEncode/EncodeThread.h"
 #include "../Service/StreamingServer/StreamingServer.h"
 
 class DesktopStreamingServerApp
@@ -129,17 +128,13 @@ public:
 			return false;
 		}
 
-		m_encodeThread = new EncodeThread();
-		if (!m_encodeThread)
+		// 엔코드 워커는 이제 엔코더가 소유한다. 앱이 EncodeThread 를 직접
+		// 만들지 않고 StartEncodeThread 로 맡긴다.
+		m_nvEncoder->SetKeyFrameRequestCallback(KeyFrameRequestCallback, this);
+		m_nvEncoder->SetEncodedPacketCallback(EncodedPacketCallback, this);
+		if (!m_nvEncoder->StartEncodeThread(m_encodeFrameQueue))
 		{
-			Shutdown();
-			return false;
-		}
-
-		m_encodeThread->SetKeyFrameRequestCallback(KeyFrameRequestCallback, this);
-		m_encodeThread->SetEncodedFrameCallback(EncodedFrameCallback, this);
-		if (!m_encodeThread->Initialize(m_encodeFrameQueue, m_nvEncoder))
-		{
+			printf_s("[DesktopStreamingServer] Failed to start the encode thread.\n");
 			Shutdown();
 			return false;
 		}
@@ -201,11 +196,11 @@ public:
 	{
 		m_running = false;
 
-		if (m_encodeThread)
+		// 큐를 먼저 닫아 워커를 깨우고, 그 다음 캡처를 멈춘다.
+		// (Destroy 도 워커를 멈추지만 순서를 명시해 둔다)
+		if (m_nvEncoder)
 		{
-			m_encodeThread->Shutdown();
-			delete m_encodeThread;
-			m_encodeThread = nullptr;
+			m_nvEncoder->StopEncodeThread();
 		}
 
 		if (m_duplicateEngine)
@@ -273,12 +268,12 @@ private:
 		return self ? self->HasViewerWaitingForKeyframe() : false;
 	}
 
-	static void EncodedFrameCallback(const EncodeThread::EncodedFrame& frame, void* userData)
+	static void EncodedPacketCallback(const NvEncPacket& packet, void* userData)
 	{
 		DesktopStreamingServerApp* self = static_cast<DesktopStreamingServerApp*>(userData);
 		if (self)
 		{
-			self->OnEncodedFrame(frame);
+			self->OnEncodedFrame(packet);
 		}
 	}
 
@@ -332,7 +327,7 @@ private:
 		return m_streamingServer && m_streamingServer->HasViewerWaitingForKeyframe();
 	}
 
-	void OnEncodedFrame(const EncodeThread::EncodedFrame& frame)
+	void OnEncodedFrame(const NvEncPacket& frame)
 	{
 		if (!m_streamingServer || !frame.data || frame.size == 0)
 			return;
@@ -353,5 +348,4 @@ private:
 	D3D11NvEncoder* m_nvEncoder = nullptr;
 	StreamingServer* m_streamingServer = nullptr;
 	EncodeFrameQueue* m_encodeFrameQueue = nullptr;
-	EncodeThread* m_encodeThread = nullptr;
 };
