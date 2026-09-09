@@ -10,3 +10,6 @@ obj/
 *.VC.db
 *.VC.opendb
 *.bak
+
+# 셰이더 컴파일 산출물
+*.cso
