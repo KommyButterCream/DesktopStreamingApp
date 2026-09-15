@@ -117,6 +117,28 @@ bool StreamingServer::BroadcastEncodedFrame(const uint8_t* encodedData, uint32_t
 	if (viewerCount == 0)
 		return true;
 
+	if (!m_viewerTakingFrame)
+		return false;
+
+	// 프레임은 뷰어별로 전부-아니면-전무다.
+	//
+	// 예전에는 청크 하나가 큐 포화로 실패해도 그냥 넘어가고 다음 청크를
+	// 계속 밀었다. 클라이언트는 그 구멍을 잡아내지만(재조립이 chunkIndex 를
+	// 순서대로 요구한다) 그래서 그 프레임을 통째로 버리므로, 뒤이어 보낸
+	// 청크들은 이미 차 있는 큐를 더 채우는 순수한 낭비였다.
+	//
+	// 그보다 나빴던 것은 대기 표시다. 키프레임의 0번 청크가 큐에 들어간
+	// 것만 보고 waitingForKeyframe 을 내렸는데, 7번에서 막히면 그 뷰어는
+	// 키프레임을 완성하지 못한다. 완성하지 못했는데 표시는 내려갔고,
+	// 그 표시를 보는 것이 인코더의 forceKeyFrame 이다
+	// (DesktopStreamingServerApp.h). 서버는 동기화됐다고 믿고 IDR 강제를
+	// 멈추므로 그 뷰어는 참조 프레임 없이 영구히 남는다.
+	//
+	// 실측: 한 바이트도 읽지 않는 뷰어에 243프레임을 밀면
+	// HasViewerWaitingForKeyframe() 이 false 로 뒤집혔다. (tools/framedrop)
+	for (uint32_t viewerIndex = 0; viewerIndex < viewerCount; ++viewerIndex)
+		m_viewerTakingFrame[viewerIndex] = true;
+
 	constexpr uint32_t chunkHeaderSize = GetDesktopStreamingFrameChunkHeaderSize();
 	const uint32_t maxChunkDataSize = MEMORY_SIZE_32K - chunkHeaderSize;
 	if (maxChunkDataSize == 0)
@@ -127,10 +149,23 @@ bool StreamingServer::BroadcastEncodedFrame(const uint8_t* encodedData, uint32_t
 		return false;
 
 	const uint16_t chunkCount = static_cast<uint16_t>(chunkCount32);
-	uint32_t enqueuedCount = 0;
 
 	for (uint16_t chunkIndex = 0; chunkIndex < chunkCount; ++chunkIndex)
 	{
+		// 아무도 이 프레임을 끝까지 받고 있지 않으면 남은 청크는 낭비다.
+		bool anyViewerLeft = false;
+		for (uint32_t viewerIndex = 0; viewerIndex < viewerCount; ++viewerIndex)
+		{
+			if (m_viewerTakingFrame[viewerIndex])
+			{
+				anyViewerLeft = true;
+				break;
+			}
+		}
+
+		if (!anyViewerLeft)
+			break;
+
 		const uint32_t chunkOffset = static_cast<uint32_t>(chunkIndex) * maxChunkDataSize;
 		const uint32_t remainingSize = encodedSize - chunkOffset;
 		const uint32_t chunkDataSize = (remainingSize < maxChunkDataSize) ? remainingSize : maxChunkDataSize;
@@ -141,7 +176,13 @@ bool StreamingServer::BroadcastEncodedFrame(const uint8_t* encodedData, uint32_t
 		void* packetMemory = MEMORY_POOL::CreatePacket(*GetPacketMemoryPool(), packetSize);
 		SC_DESKTOP_STREAMING_FRAME_CHUNK_PACKET* framePacket = reinterpret_cast<SC_DESKTOP_STREAMING_FRAME_CHUNK_PACKET*>(packetMemory);
 		if (!framePacket)
+		{
+			// 여기서 그냥 돌아가면 앞선 청크를 이미 받은 뷰어들이 미완성
+			// 프레임을 안고 남는다. 키프레임이었다면 대기 표시를 되살려야
+			// 다음 IDR 을 받는다.
+			AbortFrameForTakingViewers(viewers, viewerCount, isKeyFrame);
 			return false;
+		}
 
 		*framePacket = SC_DESKTOP_STREAMING_FRAME_CHUNK_PACKET();
 		framePacket->header.packetSize = packetSize;
@@ -166,41 +207,112 @@ bool StreamingServer::BroadcastEncodedFrame(const uint8_t* encodedData, uint32_t
 		if (!sharedPacket)
 		{
 			MEMORY_POOL::ReleasePacket(*GetPacketMemoryPool(), *GetGeneralMemoryPool(), framePacket);
+			AbortFrameForTakingViewers(viewers, viewerCount, isKeyFrame);
 			return false;
 		}
 
 		for (uint32_t viewerIndex = 0; viewerIndex < viewerCount; ++viewerIndex)
 		{
+			// 이 프레임을 이미 놓친 뷰어에게는 나머지 청크를 보내지 않는다.
+			// 어차피 재조립에서 버려질 바이트로 포화된 큐를 더 채울 뿐이다.
+			if (!m_viewerTakingFrame[viewerIndex])
+				continue;
+
 			ClientSession* viewer = viewers[viewerIndex];
 			if (!viewer)
+			{
+				m_viewerTakingFrame[viewerIndex] = false;
 				continue;
+			}
 
 			DesktopStreamServerSessionContext* streamContext = dynamic_cast<DesktopStreamServerSessionContext*>(viewer->GetSessionContext());
 			if (!streamContext || streamContext->streamId != DESKTOP_STREAM_ID_PRIMARY)
+			{
+				m_viewerTakingFrame[viewerIndex] = false;
 				continue;
+			}
 
+			// 키프레임을 기다리는 뷰어에게 P 프레임은 의미가 없다. 실패가
+			// 아니라 정상적인 건너뛰기이므로 대기 표시는 그대로 둔다.
 			if (streamContext->waitingForKeyframe && !isKeyFrame)
+			{
+				m_viewerTakingFrame[viewerIndex] = false;
 				continue;
+			}
 
 			SHARED_SEND_PACKET::AddRef(sharedPacket);
-			if (viewer->EnqueueSharedSendPacket(framePacket, packetSize, SHARED_SEND_PACKET::ReleaseCallback, sharedPacket))
-			{
-				++enqueuedCount;
-				if (isKeyFrame && chunkIndex == 0)
-				{
-					streamContext->waitingForKeyframe = false;
-				}
-			}
-			else
+			if (!viewer->EnqueueSharedSendPacket(framePacket, packetSize, SHARED_SEND_PACKET::ReleaseCallback, sharedPacket))
 			{
 				SHARED_SEND_PACKET::Release(sharedPacket);
+
+				// 이 뷰어는 이 프레임을 완성할 수 없다. 앞서 보낸 청크는
+				// 클라이언트가 버리고, 남은 청크는 보내지 않는다.
+				//
+				// 그리고 다음 키프레임부터 다시 시작해야 한다. 이 표시가
+				// 인코더의 IDR 강제를 되살린다.
+				m_viewerTakingFrame[viewerIndex] = false;
+				streamContext->waitingForKeyframe = true;
 			}
 		}
 
 		SHARED_SEND_PACKET::Release(sharedPacket);
 	}
 
-	return enqueuedCount > 0;
+	// 마지막 청크까지 실패 없이 온 뷰어만 프레임을 온전히 받았다.
+	// 키프레임의 대기 표시를 내리는 자리는 여기 하나뿐이다.
+	uint32_t deliveredCount = 0;
+
+	for (uint32_t viewerIndex = 0; viewerIndex < viewerCount; ++viewerIndex)
+	{
+		if (!m_viewerTakingFrame[viewerIndex])
+			continue;
+
+		++deliveredCount;
+
+		if (!isKeyFrame)
+			continue;
+
+		ClientSession* viewer = viewers[viewerIndex];
+		if (!viewer)
+			continue;
+
+		DesktopStreamServerSessionContext* streamContext = dynamic_cast<DesktopStreamServerSessionContext*>(viewer->GetSessionContext());
+		if (streamContext)
+		{
+			streamContext->waitingForKeyframe = false;
+		}
+	}
+
+	return deliveredCount > 0;
+}
+
+// 프레임 중간에 포기한다. 이미 앞선 청크를 받은 뷰어들은 미완성 프레임을
+// 안게 되므로, 키프레임이었다면 대기 표시를 되살려 다음 IDR 을 받게 한다.
+void StreamingServer::AbortFrameForTakingViewers(ClientSession** viewers, uint32_t viewerCount, bool isKeyFrame)
+{
+	if (!viewers || !m_viewerTakingFrame)
+		return;
+
+	for (uint32_t viewerIndex = 0; viewerIndex < viewerCount; ++viewerIndex)
+	{
+		if (!m_viewerTakingFrame[viewerIndex])
+			continue;
+
+		m_viewerTakingFrame[viewerIndex] = false;
+
+		if (!isKeyFrame)
+			continue;
+
+		ClientSession* viewer = viewers[viewerIndex];
+		if (!viewer)
+			continue;
+
+		DesktopStreamServerSessionContext* streamContext = dynamic_cast<DesktopStreamServerSessionContext*>(viewer->GetSessionContext());
+		if (streamContext)
+		{
+			streamContext->waitingForKeyframe = true;
+		}
+	}
 }
 
 void* StreamingServer::GetServiceContext()
@@ -397,6 +509,16 @@ bool StreamingServer::InitializeViewerList(uint32_t maxConnectionCount)
 		return false;
 	}
 
+	m_viewerTakingFrame = new (std::nothrow) bool[maxConnectionCount] {};
+	if (!m_viewerTakingFrame)
+	{
+		delete[] m_subscribedViewerSnapshot;
+		m_subscribedViewerSnapshot = nullptr;
+		delete[] m_viewers;
+		m_viewers = nullptr;
+		return false;
+	}
+
 	m_viewerCapacity = maxConnectionCount;
 	m_viewerCount = 0;
 	m_subscribedViewerSnapshotCount = 0;
@@ -417,6 +539,12 @@ void StreamingServer::FinalizeViewerList()
 	{
 		delete[] m_subscribedViewerSnapshot;
 		m_subscribedViewerSnapshot = nullptr;
+	}
+
+	if (m_viewerTakingFrame)
+	{
+		delete[] m_viewerTakingFrame;
+		m_viewerTakingFrame = nullptr;
 	}
 
 	m_viewerCapacity = 0;

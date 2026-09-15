@@ -58,6 +58,10 @@ private:
 	//   - 서버 객체(this)를 들고 있다가 반납 시점에 GetPacketMemoryPool() 을
 	//     불렀다. 늦게 도착한 반납이 StopServer 뒤면 죽은 풀을 역참조한다.
 	// 엔진판은 서버가 아니라 풀 자체를 들고, 자기도 풀에서 나온다.
+	// 프레임 전송을 중간에 포기할 때, 앞선 청크를 이미 받은 뷰어들의
+	// 대기 표시를 되살린다. (사정은 구현부 주석)
+	void AbortFrameForTakingViewers(ClientSession** viewers, uint32_t viewerCount, bool isKeyFrame);
+
 	uint32_t GetSubscribedViewerSnapshot(ClientSession*** viewers);
 	void MarkViewerSnapshotDirty();
 	void RebuildSubscribedViewerSnapshot();
@@ -65,6 +69,16 @@ private:
 private:
 	ClientSession** m_viewers = nullptr;
 	ClientSession** m_subscribedViewerSnapshot = nullptr;
+
+	// 지금 브로드캐스트 중인 프레임을 아직 끝까지 받고 있는 뷰어 표시.
+	// 스냅샷과 같은 순서, 같은 길이다.
+	//
+	// 프레임을 청크로 쪼개 보내는데 루프가 청크 바깥 / 뷰어 안쪽이라,
+	// "이 뷰어는 3번 청크에서 막혔으니 나머지도 보내지 말자" 를 기억할
+	// 곳이 필요하다. BroadcastEncodedFrame 은 인코더 스레드 하나에서만
+	// 불리므로 멤버 배열로 충분하다.
+	bool* m_viewerTakingFrame = nullptr;
+
 	uint32_t m_viewerCapacity = 0;
 	uint32_t m_viewerCount = 0;
 	uint32_t m_subscribedViewerSnapshotCount = 0;
