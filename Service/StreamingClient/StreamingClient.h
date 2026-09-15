@@ -34,7 +34,12 @@ private:
 	void* GetServiceContext() override;
 	void OnClientConnect(ISession* session) override;
 	void OnSessionEstablished(ISession* session) override;
-	void OnClientDisconnect(ISession* session) override;
+	void OnClientDisconnect(ISession* session, DisconnectReason reason) override;
+
+	// 접속 자체가 실패했다. 서버가 안 떠 있으면 이쪽으로만 온다 —
+	// OnClientConnect 를 부른 적이 없으므로 OnClientDisconnect 는 오지 않는다.
+	void OnConnectFailed(int errorCode) override;
+
 	void OnReceive(ISession* session, uint16_t packetId, const char* packetData, uint32_t packetSize) override;
 	void OnSend(ISession* session, uint32_t bytesTransferred) override;
 

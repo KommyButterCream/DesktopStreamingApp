@@ -2,7 +2,7 @@
 
 #include "../../../../Module/IOCPNetworkEngine/HandlerTable/PacketHandlerTable.h" // for PacketHandlerTable
 #include "../../../../Module/IOCPNetworkEngine/Session/ClientSession.h" // for ClientSession
-#include "../../../../Module/IOCPNetworkEngine/Memory/SlabMemoryPoolHelper.h" // for MEMORY_POOL
+#include "../../../../Module/IOCPNetworkEngine/Memory/EngineMemoryPoolHelper.h" // for MEMORY_POOL
 
 #include "../StreamingProtocol/StreamingPacket.h" // for Request, Response Packet Structure
 #include "../StreamingProtocol/StreamingPacketID.h" // for PACKET_ID

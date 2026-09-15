@@ -28,7 +28,7 @@ public:
 private:
 	void* GetServiceContext() override;
 	void OnClientConnect(ISession* session) override;
-	void OnClientDisconnect(ISession* session) override;
+	void OnClientDisconnect(ISession* session, DisconnectReason reason) override;
 	void OnReceive(ISession* session, uint16_t packetId, const char* packetData, uint32_t packetSize) override;
 	void OnSend(ISession* session, uint32_t bytesTransferred) override;
 
@@ -48,11 +48,16 @@ private:
 	bool SendStreamInfoPacket(ClientSession* session, const HandlerContext& context);
 
 private:
-	struct SharedStreamPacket;
-
-	static void ReleaseSharedStreamPacketCallback(const void* packetData, void* context);
-	void AddRefSharedStreamPacket(SharedStreamPacket* sharedPacket);
-	void ReleaseSharedStreamPacket(SharedStreamPacket* sharedPacket);
+	// 여기에 SharedStreamPacket 구조체와 AddRef / Release / 정적 콜백이
+	// 있었다. 엔진의 SharedSendPacket(Buffer/SharedSendPacket.h)이 같은 일을
+	// 하므로 그쪽을 쓴다.
+	//
+	// 옮긴 이유는 재사용이 아니라 두 가지 결함이었다.
+	//   - 청크마다 new / delete 를 했다. 엔진이 패킷 경로에서 걷어낸 힙이
+	//     브로드캐스트 팬아웃 지점에서 그대로 돌아와 있었다.
+	//   - 서버 객체(this)를 들고 있다가 반납 시점에 GetPacketMemoryPool() 을
+	//     불렀다. 늦게 도착한 반납이 StopServer 뒤면 죽은 풀을 역참조한다.
+	// 엔진판은 서버가 아니라 풀 자체를 들고, 자기도 풀에서 나온다.
 	uint32_t GetSubscribedViewerSnapshot(ClientSession*** viewers);
 	void MarkViewerSnapshotDirty();
 	void RebuildSubscribedViewerSnapshot();

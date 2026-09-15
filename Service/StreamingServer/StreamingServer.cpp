@@ -5,7 +5,8 @@
 #include "../../../../Module/IOCPNetworkEngine/Scheduler/ReadySessionQueue.h" 
 
 #include "../../../../Module/IOCPNetworkEngine/Buffer/PreDefine.h"
-#include "../../../../Module/IOCPNetworkEngine/Memory/SlabMemoryPoolHelper.h" 
+#include "../../../../Module/IOCPNetworkEngine/Buffer/SharedSendPacket.h"
+#include "../../../../Module/IOCPNetworkEngine/Memory/EngineMemoryPoolHelper.h" 
 
 #include "../../../../Module/IOCPNetworkEngine/Protocol/PacketID.h" 
 
@@ -19,13 +20,6 @@
 #include <new>
 
 using namespace Core::Util;
-
-struct StreamingServer::SharedStreamPacket
-{
-	volatile LONG refCount = 1;
-	StreamingServer* owner = nullptr;
-	void* packet = nullptr;
-};
 
 StreamingServer::StreamingServer()
 {
@@ -164,15 +158,16 @@ bool StreamingServer::BroadcastEncodedFrame(const uint8_t* encodedData, uint32_t
 		framePacket->frameType = frameType;
 		memcpy(framePacket->chunkData, encodedData + chunkOffset, chunkDataSize);
 
-		SharedStreamPacket* sharedPacket = new (std::nothrow) SharedStreamPacket();
+		// 참조 계수 규약은 SharedSendPacket.h 의 예시 그대로다 —
+		// Create 가 1 로 시작하고 그 1 이 배포자 몫이다.
+		SharedSendPacket* sharedPacket = SHARED_SEND_PACKET::Create(
+			*GetSendQueueMemoryPool(), *GetPacketMemoryPool(), framePacket);
+
 		if (!sharedPacket)
 		{
 			MEMORY_POOL::ReleasePacket(*GetPacketMemoryPool(), *GetGeneralMemoryPool(), framePacket);
 			return false;
 		}
-
-		sharedPacket->owner = this;
-		sharedPacket->packet = framePacket;
 
 		for (uint32_t viewerIndex = 0; viewerIndex < viewerCount; ++viewerIndex)
 		{
@@ -187,8 +182,8 @@ bool StreamingServer::BroadcastEncodedFrame(const uint8_t* encodedData, uint32_t
 			if (streamContext->waitingForKeyframe && !isKeyFrame)
 				continue;
 
-			AddRefSharedStreamPacket(sharedPacket);
-			if (viewer->EnqueueSharedSendPacket(framePacket, packetSize, ReleaseSharedStreamPacketCallback, sharedPacket))
+			SHARED_SEND_PACKET::AddRef(sharedPacket);
+			if (viewer->EnqueueSharedSendPacket(framePacket, packetSize, SHARED_SEND_PACKET::ReleaseCallback, sharedPacket))
 			{
 				++enqueuedCount;
 				if (isKeyFrame && chunkIndex == 0)
@@ -198,11 +193,11 @@ bool StreamingServer::BroadcastEncodedFrame(const uint8_t* encodedData, uint32_t
 			}
 			else
 			{
-				ReleaseSharedStreamPacket(sharedPacket);
+				SHARED_SEND_PACKET::Release(sharedPacket);
 			}
 		}
 
-		ReleaseSharedStreamPacket(sharedPacket);
+		SHARED_SEND_PACKET::Release(sharedPacket);
 	}
 
 	return enqueuedCount > 0;
@@ -222,7 +217,7 @@ void StreamingServer::OnClientConnect(ISession* session)
 	clientSession->SetSessionContext(new (std::nothrow) DesktopStreamServerSessionContext());
 }
 
-void StreamingServer::OnClientDisconnect(ISession* session)
+void StreamingServer::OnClientDisconnect(ISession* session, DisconnectReason reason)
 {
 	ClientSession* clientSession = dynamic_cast<ClientSession*>(session);
 	if (!clientSession)
@@ -247,67 +242,19 @@ void StreamingServer::OnReceive(ISession* session, uint16_t packetId, const char
 
 	Logger::Log(LogLevel::LOG_INFO, "[%s] RECV PACKET - ID: %u, Size: %d, %d, %s", __FUNCTION__, session->GetSessionID(), packetId, packetSize, payload);
 
-	PacketHandlerTable* packetHandlerTable = GetPacketHandlerTable();
-	if (!packetHandlerTable)
+	// 잡 생성 + 큐 적재 + 세션 스케줄을 엔진이 한 번에 처리한다.
+	//
+	// 예전에는 이 자리에서 다섯 단계를 직접 했다 — CreateJob, EnqueueJob,
+	// wasEmpty 검사, IsProcessingReady, Push, 그리고 Push 실패 시 플래그
+	// 복구. 어느 하나를 빠뜨리면 그 세션이 조용히 영구 정지하는 규약이었다.
+	//
+	// packetData 의 소유권도 이 호출이 가져간다. 실패해도 엔진이 회수하므로
+	// 여기서 해제할 일이 없다. (예전 실패 경로들은 그냥 return 해서 패킷을
+	// 흘리고 있었다)
+	if (!SubmitPacketJob(session, packetId, packetData, packetSize))
 	{
-		__debugbreak();
-
-		return;
-	}
-
-	PacketHandlerFunc packetHandler = packetHandlerTable->GetHandler(packetId);
-	if (!packetHandler)
-	{
-		__debugbreak();
-
-		return;
-	}
-
-	// Job 생성
-	Job* job = MEMORY_POOL::CreateJob(*GetJobMemoryPool());
-	if (!job)
-	{
-		__debugbreak();
-
-		return;
-	}
-
-	job->SetPacketJob(JobType::PACKET, packetHandler, session, packetId, packetData, packetSize, GetHandlerContext());
-
-	bool wasEmpty = false;
-	bool enqueueSucceeded = clientSession->GetJobQueue().EnqueueJob(job, wasEmpty);
-
-	if (wasEmpty && enqueueSucceeded)
-	{
-		// JobQueue 가 비어있었다면 ReadySessionQueue 에 Session 을 스케줄링 하기 위해 Push 해주어야 한다.
-		// 중복으로 Session 을 Push 하는 것을 방지 하기 위해 Processing 플래그를 Atomic 하게 검사.
-		if (clientSession->IsProcessingReady())
-		{
-			// Session 이 Idle 상태인 경우
-			// ReadySessionQueue 에 Push 하자!
-			if (!GetReadySessionQueue()->Push(clientSession))
-			{
-				// Push 실패한 경우 플래그를 원상 복구하고 로그 처리 하자.
-				clientSession->UpdateProcessingFlag(0);
-			}
-		}
-		else
-		{
-			// 이미 Session 이 Processing 중 일 때
-		}
-	}
-	else
-	{
-		if (!enqueueSucceeded)
-		{
-			// EnqueueJob 에 실패한 경우
-			// log...
-		}
-
-		if (enqueueSucceeded && !wasEmpty)
-		{
-			// 이미 Session 이 Processing 중 일 때
-		}
+		Logger::Log(LogLevel::LOG_WARNING, "[%s] packet id %u was not queued for session %u",
+			__FUNCTION__, packetId, session->GetSessionID());
 	}
 }
 
@@ -357,37 +304,6 @@ bool StreamingServer::HandleSubscribe(ClientSession* session, uint32_t streamId,
 	}
 
 	return true;
-}
-
-void StreamingServer::ReleaseSharedStreamPacketCallback(const void* packetData, void* context)
-{
-	SharedStreamPacket* sharedPacket = static_cast<SharedStreamPacket*>(context);
-	if (!sharedPacket || !sharedPacket->owner)
-		return;
-
-	sharedPacket->owner->ReleaseSharedStreamPacket(sharedPacket);
-}
-
-void StreamingServer::AddRefSharedStreamPacket(SharedStreamPacket* sharedPacket)
-{
-	if (!sharedPacket)
-		return;
-
-	::InterlockedIncrement(&sharedPacket->refCount);
-}
-
-void StreamingServer::ReleaseSharedStreamPacket(SharedStreamPacket* sharedPacket)
-{
-	if (!sharedPacket)
-		return;
-
-	const LONG refCount = ::InterlockedDecrement(&sharedPacket->refCount);
-	if (refCount != 0)
-		return;
-
-	MEMORY_POOL::ReleasePacket(*GetPacketMemoryPool(), *GetGeneralMemoryPool(), sharedPacket->packet);
-	sharedPacket->packet = nullptr;
-	delete sharedPacket;
 }
 
 uint32_t StreamingServer::GetSubscribedViewerSnapshot(ClientSession*** viewers)

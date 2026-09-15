@@ -5,7 +5,7 @@
 #include "../../../../Module/IOCPNetworkEngine/Job/Job.h"
 #include "../../../../Module/IOCPNetworkEngine/HandlerTable/PacketHandlerTable.h"
 
-#include "../../../../Module/IOCPNetworkEngine/Memory/SlabMemoryPoolHelper.h"
+#include "../../../../Module/IOCPNetworkEngine/Memory/EngineMemoryPoolHelper.h"
 
 #include "../../../../Module/IOCPNetworkEngine/Protocol/PacketID.h"
 
@@ -167,8 +167,19 @@ void StreamingClient::OnSessionEstablished(ISession* session)
 	SendSubscribe(DESKTOP_STREAM_ID_PRIMARY);
 }
 
-void StreamingClient::OnClientDisconnect(ISession* session)
+void StreamingClient::OnConnectFailed(int errorCode)
 {
+	Logger::Log(LogLevel::LOG_WARNING, "[%s] could not reach the server : WSA error %d",
+		__FUNCTION__, errorCode);
+}
+
+void StreamingClient::OnClientDisconnect(ISession* session, DisconnectReason reason)
+{
+	// 사유를 남긴다. 재접속 정책을 붙이기 전이라도 "왜 끊겼는지" 가
+	// 로그에 남아야 현장에서 판단할 수 있다.
+	Logger::Log(LogLevel::LOG_INFO, "[%s] disconnected : %s (retryable=%d)",
+		__FUNCTION__, ToString(reason), IsRetryableDisconnect(reason) ? 1 : 0);
+
 	ClientSession* clientSession = dynamic_cast<ClientSession*>(session);
 	if (!clientSession)
 		return;
@@ -183,38 +194,15 @@ void StreamingClient::OnClientDisconnect(ISession* session)
 
 void StreamingClient::OnReceive(ISession* session, uint16_t packetId, const char* packetData, uint32_t packetSize)
 {
-	ClientSession* clientSession = dynamic_cast<ClientSession*>(session);
-	if (!clientSession)
+	// 잡 생성과 큐 적재를 엔진이 처리한다. packetData 의 소유권도 넘어간다.
+	//
+	// 예전에는 이 자리에서 직접 했는데, 네 개의 실패 경로가 전부
+	// __debugbreak 후 그냥 return 해서 packetData 를 흘리고 있었다.
+	// (서버 쪽과 같은 규약이라 같은 함수 이름을 쓴다)
+	if (!SubmitPacketJob(session, packetId, packetData, packetSize))
 	{
-		__debugbreak();
-		return;
+		Logger::Log(LogLevel::LOG_WARNING, "[%s] packet id %u was not queued", __FUNCTION__, packetId);
 	}
-
-	PacketHandlerTable* packetHandlerTable = GetPacketHandlerTable();
-	if (!packetHandlerTable)
-	{
-		__debugbreak();
-		return;
-	}
-
-	PacketHandlerFunc packetHandler = packetHandlerTable->GetHandler(packetId);
-	if (!packetHandler)
-	{
-		__debugbreak();
-		return;
-	}
-
-	Job* job = MEMORY_POOL::CreateJob(*GetJobMemoryPool());
-	if (!job)
-	{
-		__debugbreak();
-		return;
-	}
-
-	job->SetPacketJob(JobType::PACKET, packetHandler, session, packetId, packetData, packetSize, GetHandlerContext());
-
-	bool wasEmpty = false;
-	clientSession->GetJobQueue().EnqueueJob(job, wasEmpty);
 }
 
 void StreamingClient::OnSend(ISession* session, uint32_t bytesTransferred)
