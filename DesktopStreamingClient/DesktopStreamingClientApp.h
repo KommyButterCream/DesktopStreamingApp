@@ -375,12 +375,12 @@ private:
 		}
 	}
 
-	static void FrameCallback(const uint8_t* frameData, uint32_t frameSize, uint64_t frameId, uint64_t timestamp, uint16_t frameType, void* userData)
+	static void FrameCallback(const uint8_t* frameData, uint32_t frameSize, uint64_t /*frameId*/, uint64_t timestamp, uint16_t /*frameType*/, void* userData)
 	{
 		DesktopStreamingClientApp* self = static_cast<DesktopStreamingClientApp*>(userData);
 		if (self)
 		{
-			self->OnEncodedFrame(frameData, frameSize, frameId, timestamp, frameType);
+			self->OnEncodedFrame(frameData, frameSize, timestamp);
 		}
 	}
 
@@ -507,7 +507,7 @@ private:
 		::InterlockedExchange(&m_paceResetRequest, TRUE);
 	}
 
-	void OnEncodedFrame(const uint8_t* frameData, uint32_t frameSize, uint64_t frameId, uint64_t timestamp, uint16_t frameType)
+	void OnEncodedFrame(const uint8_t* frameData, uint32_t frameSize, uint64_t timestamp)
 	{
 		if (!m_nvDecoder || !frameData || frameSize == 0)
 			return;
@@ -515,9 +515,7 @@ private:
 		NvDecPacket packet = {};
 		packet.data = frameData;
 		packet.size = frameSize;
-		packet.frameId = frameId;
 		packet.timestamp = timestamp;
-		packet.frameType = frameType;
 
 		// 실패는 큐가 가득 찬 것이고 그때 가장 오래된 패킷이 버려진다.
 		// 그 수는 GetStats 의 droppedInputQueue 로 나오므로 여기서 따로
