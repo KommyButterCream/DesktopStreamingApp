@@ -512,17 +512,17 @@ private:
 		if (!m_nvDecoder || !frameData || frameSize == 0)
 			return;
 
-		NvDecInputFrame frameHandle = {};
-		frameHandle.data = frameData;
-		frameHandle.size = frameSize;
-		frameHandle.frameId = frameId;
-		frameHandle.timestamp = timestamp;
-		frameHandle.frameType = frameType;
+		NvDecPacket packet = {};
+		packet.data = frameData;
+		packet.size = frameSize;
+		packet.frameId = frameId;
+		packet.timestamp = timestamp;
+		packet.frameType = frameType;
 
-		// 실패는 큐가 가득 찬 것이고 그때 가장 오래된 프레임이 버려진다.
+		// 실패는 큐가 가득 찬 것이고 그때 가장 오래된 패킷이 버려진다.
 		// 그 수는 GetStats 의 droppedInputQueue 로 나오므로 여기서 따로
 		// 세지 않는다.
-		m_nvDecoder->EnqueueFrame(frameHandle);
+		m_nvDecoder->EnqueuePacket(packet);
 	}
 
 	// --- 지터 버퍼 ---

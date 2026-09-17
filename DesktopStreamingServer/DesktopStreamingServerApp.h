@@ -514,19 +514,19 @@ private:
 		}
 	}
 
-	static void ReleaseCapturedFrameHandleCallback(NvEncInputFrame& frameHandle, void* userData)
+	static void ReleaseCapturedFrameCallback(NvEncInputFrame& inputFrame, void* userData)
 	{
 		DesktopStreamingServerApp* self = static_cast<DesktopStreamingServerApp*>(userData);
 		if (self)
 		{
-			self->ReleaseCapturedFrameHandle(frameHandle);
+			self->ReleaseCapturedFrame(inputFrame);
 		}
 	}
 
 	// 인코드 스레드가 매 프레임 묻는다 (EncodeThread::QueryKeyFrameRequest).
 	//
 	// IDR 강제를 소비하는 자리는 여기 하나뿐이다. 예전에는 OnFrameCallback
-	// 도 같은 질문을 해서 EnqueueLatest 의 forceKeyFrame 으로 넘겼는데,
+	// 도 같은 질문을 해서 EnqueueFrame 의 forceKeyFrame 으로 넘겼는데,
 	// 두 가지가 나빴다.
 	//
 	//   큐가 latest-only 라 그 플래그를 단 프레임이 다음 프레임에 밀려
@@ -763,7 +763,7 @@ private:
 		//
 		//   m_nvEncoder->Initialize(device, w, h, 4, gate);
 		//
-		// 그 오버로드는 width / height / encodeBufferCount / async 네 개만
+		// 그 오버로드는 width / height / encodeSlotCount / async 네 개만
 		// 채우고 나머지는 NvEncConfig 의 기본값을 쓴다. 그래서
 		// frameRateNumerator 가 60 으로 남았는데, 캡처는 SetTargetFps(30)
 		// 으로 돌고 있었다.
@@ -779,7 +779,7 @@ private:
 		NvEncConfig encodeConfig;
 		encodeConfig.width = width;
 		encodeConfig.height = height;
-		encodeConfig.encodeBufferCount = 4;
+		encodeConfig.encodeSlotCount = 4;
 		encodeConfig.enableAsyncPipeline = true;
 
 		// 원격 화면 공유다. 지연이 화질보다 우선한다.
@@ -855,7 +855,7 @@ private:
 		// 인코더가 새로 만들어졌으므로 콜백도 다시 건다.
 		// 유입 큐도 이때 새로 만들어지므로 반납 콜백이 특히 중요하다 —
 		// 빠뜨리면 버려진 프레임의 캡처 슬롯이 영영 반납되지 않는다.
-		m_nvEncoder->SetFrameReleaseCallback(ReleaseCapturedFrameHandleCallback, this);
+		m_nvEncoder->SetFrameReleaseCallback(ReleaseCapturedFrameCallback, this);
 		m_nvEncoder->SetKeyFrameRequestCallback(KeyFrameRequestCallback, this);
 		m_nvEncoder->SetEncodedPacketCallback(EncodedPacketCallback, this);
 		m_nvEncoder->SetErrorCallback(EncoderErrorCallback, this);
@@ -916,11 +916,11 @@ private:
 
 		switch (errorCode)
 		{
-		case NvEncErrorCode::OutputReadFailed:  name = "output read failed"; fatal = false; break;
-		case NvEncErrorCode::OutputTimeout:     name = "output timeout"; break;
-		case NvEncErrorCode::OutputUnmapFailed: name = "output unmap failed"; break;
-		case NvEncErrorCode::RingCorrupted:     name = "pending ring corrupted"; break;
-		case NvEncErrorCode::EncoderFaulted:    name = "encoder faulted"; break;
+		case NvEncErrorCode::OutputReadFailed:   name = "output read failed"; fatal = false; break;
+		case NvEncErrorCode::OutputTimeout:      name = "output timeout"; break;
+		case NvEncErrorCode::OutputUnmapFailed:  name = "output unmap failed"; break;
+		case NvEncErrorCode::SlotRingCorrupted:  name = "pending ring corrupted"; break;
+		case NvEncErrorCode::EncoderFaulted:     name = "encoder faulted"; break;
 		default: break;
 		}
 
@@ -947,7 +947,7 @@ private:
 			return;
 		}
 
-		NvEncInputFrame encodeFrameHandle = {};
+		NvEncInputFrame encodeInputFrame = {};
 
 		// texture 를 넘기지 않는다.
 		//
@@ -956,24 +956,24 @@ private:
 		//
 		// 인코더는 slotId 로 자기가 초기화 때 열어 둔 공유 텍스처를 찾는다.
 		// (EncodeThread::Run 이 texture 가 null 이면 그 경로를 탄다)
-		encodeFrameHandle.texture = nullptr;
-		encodeFrameHandle.sourceSlotId = frameHandle.slotId;
-		encodeFrameHandle.frameId = frameHandle.frameId;
+		encodeInputFrame.texture = nullptr;
+		encodeInputFrame.sourceSlotId = frameHandle.slotId;
+		encodeInputFrame.frameId = frameHandle.frameId;
 
 		// 반납할 때는 원래 핸들이 필요하므로 따로 기억해 둔다.
-		// (ReleaseCapturedFrameHandle 이 texture 로 슬롯을 검증한다)
+		// (ReleaseCapturedFrame 이 texture 로 슬롯을 검증한다)
 		m_captureTextureBySlot[frameHandle.slotId & (MAX_CAPTURE_SLOTS - 1)] = frameHandle.texture;
 
 		// forceKeyFrame 은 false 다. IDR 강제를 묻는 자리는
 		// KeyFrameRequestCallback 하나뿐이다. (그쪽 주석 참고)
-		if (!m_nvEncoder->EnqueueFrame(encodeFrameHandle, false))
+		if (!m_nvEncoder->EnqueueFrame(encodeInputFrame, false))
 		{
 			m_duplicateEngine->ReleaseLatestFrameHandle(frameHandle);
 			return;
 		}
 	}
 
-	void ReleaseCapturedFrameHandle(NvEncInputFrame& frameHandle)
+	void ReleaseCapturedFrame(NvEncInputFrame& inputFrame)
 	{
 		if (m_duplicateEngine)
 		{
@@ -982,18 +982,18 @@ private:
 			// 큐에는 texture 를 싣지 않았으므로(다른 디바이스 것이라) 여기서
 			// 슬롯 번호로 되찾는다. 캡처 엔진은 반납을 검증할 때 texture 와
 			// slotId 가 짝인지 본다.
-			const int64_t slotId = frameHandle.sourceSlotId;
+			const int64_t slotId = inputFrame.sourceSlotId;
 			capturedFrameHandle.texture = (slotId >= 0)
 				? m_captureTextureBySlot[slotId & (MAX_CAPTURE_SLOTS - 1)]
 				: nullptr;
 			capturedFrameHandle.slotId = static_cast<LONG>(slotId);
-			capturedFrameHandle.frameId = frameHandle.frameId;
+			capturedFrameHandle.frameId = inputFrame.frameId;
 
 			m_duplicateEngine->ReleaseLatestFrameHandle(capturedFrameHandle);
 
-			frameHandle.texture = nullptr;
-			frameHandle.sourceSlotId = -1;
-			frameHandle.frameId = 0ULL;
+			inputFrame.texture = nullptr;
+			inputFrame.sourceSlotId = -1;
+			inputFrame.frameId = 0ULL;
 		}
 	}
 
