@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <stdint.h>
 
@@ -17,5 +17,6 @@ namespace PacketHandler
 		// Packet Handlers
 		bool HandleSubscribe(ISession* session, const char* packetData, uint32_t packetSize, const HandlerContext& context);
 		bool HandleUnSubscribe(ISession* session, const char* packetData, uint32_t packetSize, const HandlerContext& context);
+		bool HandleFeedback(ISession* session, const char* packetData, uint32_t packetSize, const HandlerContext& context);
 	}
 }

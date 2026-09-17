@@ -1,4 +1,4 @@
-#include "ServerPacketHandler.h"
+﻿#include "ServerPacketHandler.h"
 
 #include "../../../../Module/IOCPNetworkEngine/HandlerTable/PacketHandlerTable.h" // for PacketHandlerTable
 #include "../../../../Module/IOCPNetworkEngine/Session/ClientSession.h" // for ClientSession
@@ -19,6 +19,7 @@ namespace PacketHandler
 
 			registerResult &= handlerTable->Register(ToPacketID(DESKTOP_STREAMING_PACKET_ID::CS_DESKTOP_STREAMING_SUBSCRIBE), HandleSubscribe);
 			registerResult &= handlerTable->Register(ToPacketID(DESKTOP_STREAMING_PACKET_ID::CS_DESKTOP_STREAMING_UNSUBSCRIBE), HandleUnSubscribe);
+			registerResult &= handlerTable->Register(ToPacketID(DESKTOP_STREAMING_PACKET_ID::CS_DESKTOP_STREAMING_FEEDBACK), HandleFeedback);
 
 			return registerResult;
 		}
@@ -49,6 +50,22 @@ namespace PacketHandler
 
 			const CS_DESKTOP_STREAMING_UNSUBSCRIBE_PACKET* requestPacket = reinterpret_cast<const CS_DESKTOP_STREAMING_UNSUBSCRIBE_PACKET*>(packetData);
 			return server->HandleUnsubscribe(clientSession, requestPacket->streamId);
+		}
+
+		bool HandleFeedback(ISession* session, const char* packetData, uint32_t packetSize, const HandlerContext& context)
+		{
+			if (!session || !packetData || packetSize != sizeof(CS_DESKTOP_STREAMING_FEEDBACK_PACKET))
+				return false;
+
+			ClientSession* clientSession = static_cast<ClientSession*>(session);
+			StreamingServer* server = static_cast<StreamingServer*>(context.serviceContext);
+			if (!clientSession || !server)
+				return false;
+
+			const CS_DESKTOP_STREAMING_FEEDBACK_PACKET* requestPacket =
+				reinterpret_cast<const CS_DESKTOP_STREAMING_FEEDBACK_PACKET*>(packetData);
+
+			return server->HandleFeedback(clientSession, *requestPacket);
 		}
 	}
 }
