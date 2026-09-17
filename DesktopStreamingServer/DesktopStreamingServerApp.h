@@ -495,6 +495,11 @@ public:
 private:
 	static constexpr ULONGLONG STATS_INTERVAL_MS = 5'000;
 
+	// fault 재생성 한도. 창 안에서 이만큼 넘게 다시 만들어야 했다면
+	// 일시적 오류가 아니라고 보고 멈춘다.
+	static constexpr uint32_t MAX_FAULT_REBUILDS = 3;
+	static constexpr ULONGLONG FAULT_REBUILD_WINDOW_MS = 60'000;
+
 	// 비트레이트 조정 주기. 너무 짧으면 순간적인 지터에 반응하고,
 	// 너무 길면 혼잡이 길게 이어진다.
 	static constexpr ULONGLONG BITRATE_INTERVAL_MS = 2'000;
@@ -814,7 +819,6 @@ private:
 			printf_s("[DesktopStreamingServer] Failed to initialize the encoder (%ux%u @%u fps, %u bps).\n",
 				width, height, TARGET_FPS, TARGET_BITRATE_BPS);
 			return false;
-			return false;
 		}
 
 		// 캡처 풀을 인코더 디바이스에서 한 번만 열어 둔다.
@@ -870,16 +874,46 @@ private:
 		if (!m_duplicateEngine || !m_nvEncoder || !m_streamingServer || !m_encodeEngine)
 			return false;
 
+		const bool fromFault = (::InterlockedExchange(&m_rebuildFromFault, FALSE) == TRUE);
+
 		const uint32_t newWidth = m_duplicateEngine->GetOutputWidth();
 		const uint32_t newHeight = m_duplicateEngine->GetOutputHeight();
 		if (newWidth == 0 || newHeight == 0)
 		{
 			printf_s("[rebuild] capture output size is not available yet. retrying next tick.\n");
+			if (fromFault)
+				::InterlockedExchange(&m_rebuildFromFault, TRUE);
 			::InterlockedExchange(&m_streamRebuildPending, TRUE);
 			return true;
 		}
 
-		printf_s("[rebuild] %ux%u -> %ux%u\n", m_streamWidth, m_streamHeight, newWidth, newHeight);
+		// fault 로 온 재생성은 한없이 반복하지 않는다. 창 안에서 한도를 넘으면
+		// 다시 만들어도 같은 이유로 죽는다는 뜻이므로 거기서 멈춘다.
+		// 창보다 오래 멀쩡히 돌았다면 일시적인 오류로 보고 처음부터 센다.
+		if (fromFault)
+		{
+			const ULONGLONG now = ::GetTickCount64();
+			if (m_lastFaultRebuildTick != 0 && (now - m_lastFaultRebuildTick) > FAULT_REBUILD_WINDOW_MS)
+				m_faultRebuildCount = 0;
+
+			m_lastFaultRebuildTick = now;
+			++m_faultRebuildCount;
+
+			if (m_faultRebuildCount > MAX_FAULT_REBUILDS)
+			{
+				printf_s("[rebuild] the encoder faulted %u times within %llu s. giving up.\n",
+					m_faultRebuildCount, FAULT_REBUILD_WINDOW_MS / 1000ULL);
+				RequestStop();
+				return false;
+			}
+
+			printf_s("[rebuild] encoder fault recovery (%u/%u). %ux%u\n",
+				m_faultRebuildCount, MAX_FAULT_REBUILDS, newWidth, newHeight);
+		}
+		else
+		{
+			printf_s("[rebuild] %ux%u -> %ux%u\n", m_streamWidth, m_streamHeight, newWidth, newHeight);
+		}
 
 		m_nvEncoder->StopEncodeThread();
 		m_nvEncoder->Destroy();
@@ -924,12 +958,20 @@ private:
 		default: break;
 		}
 
-		printf_s("[encode] %s%s\n", name, fatal ? " (unrecoverable)" : " (frame lost, continuing)");
+		printf_s("[encode] %s%s\n", name, fatal ? " (rebuilding the encoder)" : " (frame lost, continuing)");
 
-		if (fatal)
-		{
-			RequestStop();
-		}
+		if (!fatal)
+			return;
+
+		// 여기서 인코더를 직접 손대면 안 된다. 이 콜백은 완료 스레드에서
+		// 불리는데, 재생성은 Destroy 로 그 스레드를 join 하므로 자기 자신을
+		// 기다리게 된다. 표시만 세우고 앱 루프가 실제 작업을 한다.
+		//
+		// 그 사이에 들어오는 프레임은 새지 않는다. faulted 인코더는
+		// CanSubmitFrame 이 false 라 엔코드 스레드가 큐에서 꺼내 버리고,
+		// 버릴 때 반납 콜백으로 캡처 슬롯을 돌려준다.
+		::InterlockedExchange(&m_rebuildFromFault, TRUE);
+		::InterlockedExchange(&m_streamRebuildPending, TRUE);
 	}
 
 	void OnFrameCallback()
@@ -1032,8 +1074,15 @@ private:
 	uint64_t m_lastViewerDiscarded = 0;
 	uint64_t m_lastViewerDecodeDropped = 0;
 
-	// 해상도 변경 표시. 캡처 스레드가 세우고 앱 루프가 내린다.
+	// 인코더 재생성 표시. 워커 스레드가 세우고 앱 루프가 내린다.
+	// 해상도 변경(캡처 스레드)과 인코더 fault(완료 스레드)가 같이 쓴다.
 	volatile LONG m_streamRebuildPending = FALSE;
+	volatile LONG m_rebuildFromFault = FALSE;
+
+	// fault 로 인한 재생성 횟수. 앱 루프만 만진다.
+	// 창 안에서 한도를 넘으면 계속 되살려도 소용없다고 보고 포기한다.
+	uint32_t m_faultRebuildCount = 0;
+	uint64_t m_lastFaultRebuildTick = 0;
 
 	// 지금 스트림 정보의 크기. 재구성 때 비교용이다.
 	uint16_t m_streamWidth = 0;
