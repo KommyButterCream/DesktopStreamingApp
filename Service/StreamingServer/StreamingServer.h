@@ -197,7 +197,12 @@ private:
 
 	// 대기 표시를 세우면서 그 사실을 센다. 되살린 횟수가 곧 "그 뷰어가
 	// 프레임을 완성하지 못한 횟수" 이고, 부하 테스트에서 가장 먼저 보는 값이다.
+	// 프레임을 놓친 뷰어. self-healing 이면 세기만 하고 넘어간다.
 	void RearmKeyframeWait(DesktopStreamServerSessionContext* streamContext);
+
+	// 쓸 수 있는 화면이 아예 없는 뷰어 — 새로 붙었거나 스트림 포맷이 바뀌었다.
+	// self-healing 과 무관하게 IDR 을 기다리게 한다.
+	void RequireKeyframeRestart(DesktopStreamServerSessionContext* streamContext);
 
 private:
 	ClientSession** m_viewers = nullptr;

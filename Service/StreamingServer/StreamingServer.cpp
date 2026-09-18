@@ -306,6 +306,25 @@ void StreamingServer::RearmKeyframeWait(DesktopStreamServerSessionContext* strea
 	streamContext->SetWaitingForKeyframe(true);
 }
 
+// 쓸 수 있는 화면이 없는 뷰어를 키프레임 대기로 세운다.
+//
+// RearmKeyframeWait 와 두 가지가 다르다.
+//
+// 첫째, self-healing 을 보지 않는다. 여기 오는 뷰어는 참조 프레임도
+// SPS/PPS 도 맞지 않아서 refresh 파도로 복원될 것이 없다. 프레임 몇 장을
+// 놓친 것과는 상황이 다르다.
+//
+// 둘째, 혼잡 카운터를 올리지 않는다. 해상도가 바뀐 것은 링크가 막힌 것이
+// 아닌데, 여기서 세면 비트레이트 제어가 멀쩡한 링크를 혼잡으로 읽고
+// 품질을 깎는다.
+void StreamingServer::RequireKeyframeRestart(DesktopStreamServerSessionContext* streamContext)
+{
+	if (!streamContext)
+		return;
+
+	streamContext->SetWaitingForKeyframe(true);
+}
+
 bool StreamingServer::BroadcastEncodedFrame(const uint8_t* encodedData, uint32_t encodedSize, uint64_t frameId, uint64_t timestamp, uint16_t frameType, bool isKeyFrame)
 {
 	CountUp(m_statFramesOffered);
@@ -678,7 +697,7 @@ bool StreamingServer::HandleSubscribe(ClientSession* session, uint32_t streamId,
 	//
 	// 지금은 목록에 자리가 있다는 것을 확인한 뒤에만 승낙을 보낸다.
 	streamContext->SetSubscribed(true);
-	streamContext->SetWaitingForKeyframe(true);
+	RequireKeyframeRestart(streamContext);
 	streamContext->SetStreamId(streamId);
 	streamContext->streamInfoVersion = m_streamInfoVersion;
 	streamContext->codecConfigVersion = m_codecConfigVersion;
@@ -840,7 +859,7 @@ uint32_t StreamingServer::BroadcastStreamInfo()
 
 		streamContext->streamInfoVersion = m_streamInfoVersion;
 		streamContext->codecConfigVersion = m_codecConfigVersion;
-		RearmKeyframeWait(streamContext);
+		RequireKeyframeRestart(streamContext);
 
 		if (SendStreamInfoPacket(viewer, context))
 			++notified;
