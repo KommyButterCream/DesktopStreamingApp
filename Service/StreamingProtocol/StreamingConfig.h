@@ -61,9 +61,9 @@ namespace DesktopStreamingPreset
 		// IDR 도 평균 예산을 크게 넘지 않는다. 그래도 VBV 는 목표이지
 		// 절대 상한이 아니므로 여유를 둔다.
 		//
-		// 이 값이 작으면 큰 프레임이 큐에 다 들어가지 못해 중간에 포기하고
-		// 키프레임을 다시 요구한다. 그 상황은 chunksFailed / keyframeRearms
-		// 가 정상 운영에서 오르는 것으로 드러난다 — 그러면 이 값을 올린다.
+		// 이 값이 작으면 큰 프레임이 큐에 다 들어가지 못해 중간에 포기한다.
+		// 그 상황은 chunksFailed / viewerFrameIncomplete 가 정상 운영에서
+		// 오르는 것으로 드러난다 — 그러면 이 값을 올린다.
 		uint32_t peakFrameFactor = 4;
 
 		// 밀린 뷰어를 위해 붙들어 줄 시간. 이 시간을 넘긴 화면은 버린다.

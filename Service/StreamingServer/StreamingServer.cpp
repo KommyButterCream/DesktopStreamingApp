@@ -153,7 +153,7 @@ void StreamingServer::GetStats(DesktopStreamingServerStats& stats) const
 	stats.framesAborted = ReadCount(m_statFramesAborted);
 	stats.chunksEnqueued = ReadCount(m_statChunksEnqueued);
 	stats.chunksFailed = ReadCount(m_statChunksFailed);
-	stats.keyframeRearms = ReadCount(m_statKeyframeRearms);
+	stats.viewerFrameIncomplete = ReadCount(m_statViewerFrameIncomplete);
 	stats.keyframesForced = ReadCount(m_statKeyframesForced);
 	stats.viewerFramesCompleted = ReadCount(m_statViewerFramesCompleted);
 	stats.viewerFramesDiscarded = ReadCount(m_statViewerFramesDiscarded);
@@ -174,7 +174,7 @@ void StreamingServer::ResetStats()
 	::InterlockedExchange64(&m_statFramesAborted, 0);
 	::InterlockedExchange64(&m_statChunksEnqueued, 0);
 	::InterlockedExchange64(&m_statChunksFailed, 0);
-	::InterlockedExchange64(&m_statKeyframeRearms, 0);
+	::InterlockedExchange64(&m_statViewerFrameIncomplete, 0);
 	::InterlockedExchange64(&m_statKeyframesForced, 0);
 	::InterlockedExchange64(&m_statViewerFramesCompleted, 0);
 	::InterlockedExchange64(&m_statViewerFramesDiscarded, 0);
@@ -271,13 +271,39 @@ bool StreamingServer::ShouldForceKeyFrame()
 	return true;
 }
 
+void StreamingServer::SetStreamSelfHealing(bool enabled)
+{
+	::InterlockedExchange(&m_streamSelfHealing, enabled ? TRUE : FALSE);
+}
+
+bool StreamingServer::IsStreamSelfHealing() const
+{
+	return ::InterlockedCompareExchange(const_cast<volatile LONG*>(&m_streamSelfHealing), 0, 0) != FALSE;
+}
+
+// 프레임을 완성하지 못한 뷰어를 처리한다.
 void StreamingServer::RearmKeyframeWait(DesktopStreamServerSessionContext* streamContext)
 {
 	if (!streamContext)
 		return;
 
+	// 완성하지 못했다는 사실 자체는 항상 센다. 비트레이트 적응이 이 값을
+	// 혼잡 신호로 읽으므로, 아래에서 무엇을 하든 세는 것은 멈추지 않는다.
+	CountUp(m_statViewerFrameIncomplete);
+
+	// intra refresh 가 돌고 있으면 여기서 할 일이 없다.
+	//
+	// 이 뷰어는 이미 화면을 갖고 있고 일부 프레임만 놓쳤다. 뒤이어 오는
+	// P 프레임을 그냥 받기만 해도 refresh 파도가 손상 영역을 덮어쓴다.
+	// 실측으로 확인했다 — 90프레임(1.5초) 공백을 반복해서 넣어도 NVDEC 는
+	// 오류 없이 계속 디코딩했고 IDR 없이 화면이 돌아왔다.
+	//
+	// 반대로 여기서 IDR 을 요구하면 대가가 크다. 그쪽 사정은
+	// SetStreamSelfHealing 선언부에 적어 두었다.
+	if (IsStreamSelfHealing())
+		return;
+
 	streamContext->SetWaitingForKeyframe(true);
-	CountUp(m_statKeyframeRearms);
 }
 
 bool StreamingServer::BroadcastEncodedFrame(const uint8_t* encodedData, uint32_t encodedSize, uint64_t frameId, uint64_t timestamp, uint16_t frameType, bool isKeyFrame)
@@ -449,6 +475,12 @@ bool StreamingServer::BroadcastEncodedFrame(const uint8_t* encodedData, uint32_t
 
 			// 키프레임을 기다리는 뷰어에게 P 프레임은 의미가 없다. 실패가
 			// 아니라 정상적인 건너뛰기이므로 대기 표시는 그대로 둔다.
+			//
+			// intra refresh 를 켜도 이 줄은 그대로다. 여기 걸리는 것은 아직
+			// 첫 화면이 없는 뷰어뿐이고(신규 구독 / 스트림 정보 변경),
+			// 그 뷰어에게는 참조 프레임도 SPS/PPS 도 없어서 refresh 파도로는
+			// 아무것도 복원되지 않는다. 프레임을 놓쳤을 뿐인 뷰어는
+			// RearmKeyframeWait 가 표시를 세우지 않으므로 여기 걸리지 않는다.
 			if (streamContext->IsWaitingForKeyframe() && !isKeyFrame)
 			{
 				m_viewerTakingFrame[viewerIndex] = false;

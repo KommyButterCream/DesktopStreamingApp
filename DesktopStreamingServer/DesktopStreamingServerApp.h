@@ -248,6 +248,8 @@ public:
 			return false;
 		}
 
+		SyncStreamSelfHealing();
+
 		// 엔코드 워커는 엔코더가 소유한다. 콜백은 InitializeEncoder 가 건다.
 		if (!m_nvEncoder->StartEncodeThread())
 		{
@@ -442,7 +444,7 @@ public:
 			encodeStats.droppedNoEncoderSlot, encodeStats.droppedPrepareFailed, encodeStats.droppedSubmitFailed,
 			serverStats.subscribedViewerCount, serverStats.framesOffered, serverStats.framesDelivered,
 			serverStats.framesSkippedNoViewer, serverStats.framesAborted, serverStats.chunksFailed,
-			serverStats.keyframeRearms, serverStats.keyframesForced,
+			serverStats.viewerFrameIncomplete, serverStats.keyframesForced,
 			serverStats.feedbackReports, serverStats.viewerFramesDiscarded,
 			serverStats.viewerDecodeDropped, m_currentBitrateBps / 1'000'000.0);
 
@@ -646,7 +648,7 @@ private:
 	//   서버가 아는 신호와 뷰어가 알려 준 신호, 둘 다 본다.
 	//
 	//     chunksFailed    : 뷰어 송신 큐가 찼다 (네트워크/피어가 못 받는다)
-	//     keyframeRearms  : 프레임을 완성하지 못한 뷰어가 있다
+	//     frameIncomplete : 프레임을 완성하지 못한 뷰어가 있다
 	//     viewerDiscarded : 청크가 어긋나 버린 프레임 (뷰어 보고)
 	//     viewerDecodeDrop: 디코더가 밀려 버린 프레임 (뷰어 보고)
 	//
@@ -681,24 +683,24 @@ private:
 		if (stats.subscribedViewerCount == 0)
 		{
 			m_lastChunksFailed = stats.chunksFailed;
-			m_lastKeyframeRearms = stats.keyframeRearms;
+			m_lastViewerFrameIncomplete = stats.viewerFrameIncomplete;
 			m_lastViewerDiscarded = stats.viewerFramesDiscarded;
 			m_lastViewerDecodeDropped = stats.viewerDecodeDropped;
 			return;
 		}
 
 		const uint64_t chunkFailDelta = stats.chunksFailed - m_lastChunksFailed;
-		const uint64_t rearmDelta = stats.keyframeRearms - m_lastKeyframeRearms;
+		const uint64_t incompleteDelta = stats.viewerFrameIncomplete - m_lastViewerFrameIncomplete;
 		const uint64_t discardDelta = stats.viewerFramesDiscarded - m_lastViewerDiscarded;
 		const uint64_t decodeDropDelta = stats.viewerDecodeDropped - m_lastViewerDecodeDropped;
 
 		m_lastChunksFailed = stats.chunksFailed;
-		m_lastKeyframeRearms = stats.keyframeRearms;
+		m_lastViewerFrameIncomplete = stats.viewerFrameIncomplete;
 		m_lastViewerDiscarded = stats.viewerFramesDiscarded;
 		m_lastViewerDecodeDropped = stats.viewerDecodeDropped;
 
 		const bool congested =
-			chunkFailDelta > 0 || rearmDelta > 0 || discardDelta > 0 || decodeDropDelta > 0;
+			chunkFailDelta > 0 || incompleteDelta > 0 || discardDelta > 0 || decodeDropDelta > 0;
 
 		uint32_t nextBitrate = m_currentBitrateBps;
 
@@ -751,7 +753,7 @@ private:
 			m_currentBitrateBps / 1'000'000.0, nextBitrate / 1'000'000.0,
 			congested ? "congested" : "recovering",
 			static_cast<unsigned long long>(chunkFailDelta),
-			static_cast<unsigned long long>(rearmDelta),
+			static_cast<unsigned long long>(incompleteDelta),
 			static_cast<unsigned long long>(discardDelta),
 			static_cast<unsigned long long>(decodeDropDelta));
 
@@ -866,6 +868,24 @@ private:
 
 		return true;
 	}
+	// 인코더가 intra refresh 로 도는지 서버에 알린다.
+	//
+	// 이 값 하나로 "프레임을 놓친 뷰어에게 IDR 을 요구할 것인가" 가 갈린다.
+	// 하드코딩하지 않고 인코더에게 묻는 이유는, 설정을 바꿨을 때 두 곳이
+	// 따로 놀지 않게 하기 위해서다. 인코더를 다시 만들 때도 같이 부른다.
+	void SyncStreamSelfHealing()
+	{
+		if (!m_nvEncoder || !m_streamingServer)
+			return;
+
+		NvEncConfig activeConfig;
+		m_nvEncoder->GetConfig(activeConfig);
+		m_streamingServer->SetStreamSelfHealing(activeConfig.enableIntraRefresh);
+
+		printf_s("[stream] self-healing %s (encoder intra refresh)\n",
+			activeConfig.enableIntraRefresh ? "on" : "off");
+	}
+
 	bool ServiceStreamRebuild()
 	{
 		if (::InterlockedExchange(&m_streamRebuildPending, FALSE) == FALSE)
@@ -931,6 +951,8 @@ private:
 			RequestStop();
 			return false;
 		}
+
+		SyncStreamSelfHealing();
 
 		m_streamWidth = static_cast<uint16_t>(newWidth);
 		m_streamHeight = static_cast<uint16_t>(newHeight);
@@ -1070,7 +1092,7 @@ private:
 	uint32_t m_currentBitrateBps = TARGET_BITRATE_BPS;
 	uint32_t m_cleanWindows = 0;
 	uint64_t m_lastChunksFailed = 0;
-	uint64_t m_lastKeyframeRearms = 0;
+	uint64_t m_lastViewerFrameIncomplete = 0;
 	uint64_t m_lastViewerDiscarded = 0;
 	uint64_t m_lastViewerDecodeDropped = 0;
 

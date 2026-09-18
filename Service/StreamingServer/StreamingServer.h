@@ -28,7 +28,7 @@ struct DesktopStreamingServerStats
 	uint64_t framesAborted = 0;          // 풀 고갈로 중간에 포기한 프레임
 	uint64_t chunksEnqueued = 0;         // 뷰어 송신 큐에 들어간 청크 수
 	uint64_t chunksFailed = 0;           // 큐 포화 등으로 못 넣은 청크 수
-	uint64_t keyframeRearms = 0;         // 대기 표시를 다시 세운 횟수
+	uint64_t viewerFrameIncomplete = 0;  // 뷰어가 프레임을 완성하지 못한 횟수
 	uint64_t keyframesForced = 0;        // 실제로 IDR 을 강제한 횟수
 
 	// 뷰어가 스스로 보고한 값의 합. 서버의 송신 실패(chunksFailed)와는
@@ -103,6 +103,25 @@ public:
 	bool ShouldForceKeyFrame();
 	void SetMinKeyFrameIntervalMs(uint32_t intervalMs);
 	uint32_t GetMinKeyFrameIntervalMs() const;
+
+	// 스트림이 스스로 회복하는가 — 인코더의 intra refresh 가 켜져 있는가.
+	//
+	// 켜져 있으면 프레임을 놓친 뷰어에게 IDR 을 요구하지 않는다. 그 뷰어는
+	// P 프레임을 계속 받기만 해도 refresh 파도가 한 바퀴 도는 동안 화면이
+	// 맞춰진다. 그래서 여기서 할 일이 없다.
+	//
+	// 요구하면 오히려 나쁘다. UltraLow 는 lowDelayKeyFrameScale=1 이라
+	// IDR 도 한 프레임 예산을 넘지 못하므로, 화면 전체를 intra 로 채운
+	// 프레임이 P 프레임과 같은 비트로 만들어진다. 비트레이트가 튀는 대신
+	// 화질이 무너지고, 스트림이 하나라 그 손해를 모든 뷰어가 나눠 진다.
+	//
+	// 꺼져 있으면 주기적 IDR 구성이므로 예전처럼 다음 키프레임을 기다린다.
+	//
+	// 첫 화면이 없는 뷰어는 이 설정과 무관하게 항상 IDR 이 필요하다.
+	// 참조 프레임도 SPS/PPS 도 없어 P 프레임으로는 아무것도 못 한다.
+	// 그쪽은 Subscribe / BroadcastStreamInfo 가 따로 표시를 세운다.
+	void SetStreamSelfHealing(bool enabled);
+	bool IsStreamSelfHealing() const;
 
 	// 브로드캐스트 스레드 전용. 엔코더 완료 스레드 하나만 부른다.
 	bool BroadcastEncodedFrame(const uint8_t* encodedData, uint32_t encodedSize, uint64_t frameId, uint64_t timestamp, uint16_t frameType, bool isKeyFrame);
@@ -220,7 +239,7 @@ private:
 	volatile LONG64 m_statFramesAborted = 0;
 	volatile LONG64 m_statChunksEnqueued = 0;
 	volatile LONG64 m_statChunksFailed = 0;
-	volatile LONG64 m_statKeyframeRearms = 0;
+	volatile LONG64 m_statViewerFrameIncomplete = 0;
 	volatile LONG64 m_statKeyframesForced = 0;
 	volatile LONG64 m_statViewerFramesCompleted = 0;
 	volatile LONG64 m_statViewerFramesDiscarded = 0;
@@ -230,6 +249,7 @@ private:
 
 	// IDR 강제의 최소 간격과 마지막으로 강제한 시각(GetTickCount64).
 	// 0 은 "아직 한 번도 강제하지 않음" 이므로 첫 요청은 즉시 통과한다.
+	volatile LONG m_streamSelfHealing = FALSE;
 	volatile LONG m_minKeyFrameIntervalMs = 1'000;
 	volatile LONG64 m_lastForcedKeyFrameTick = 0;
 
