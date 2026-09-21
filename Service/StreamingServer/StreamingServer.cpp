@@ -24,18 +24,6 @@ using namespace Core::Util;
 namespace
 {
 	// 세션에 붙은 스트림 컨텍스트를 꺼낸다.
-	//
-	// dynamic_cast 였다. 그런데 이 자리는 프레임 하나당 (뷰어 수 x 청크 수)
-	// 번 지나간다 — 64뷰어 16청크 30fps 면 초당 3만 번이고, dynamic_cast 는
-	// RTTI 를 걸어 타고 다니는 호출이라 그 규모에서는 공짜가 아니다.
-	//
-	// 그리고 그 비용으로 사는 안전성이 없다. 이 서버의 세션 컨텍스트를
-	// 만드는 곳은 OnClientConnect 와 HandleSubscribe 두 곳뿐이고 둘 다
-	// DesktopStreamServerSessionContext 를 넣는다. 다른 타입이 들어올
-	// 경로가 아예 없으므로 검사할 것이 없다.
-	//
-	// nullptr 은 여전히 가능하다 — new (nothrow) 가 실패하면 컨텍스트가
-	// 붙지 않은 세션이 남는다. 그건 호출부가 계속 확인한다.
 	inline DesktopStreamServerSessionContext* GetStreamContext(ClientSession* session)
 	{
 		if (!session)
@@ -282,7 +270,7 @@ bool StreamingServer::IsStreamSelfHealing() const
 }
 
 // 프레임을 완성하지 못한 뷰어를 처리한다.
-void StreamingServer::RearmKeyframeWait(DesktopStreamServerSessionContext* streamContext)
+void StreamingServer::RecordIncompleteFrame(DesktopStreamServerSessionContext* streamContext)
 {
 	if (!streamContext)
 		return;
@@ -308,7 +296,7 @@ void StreamingServer::RearmKeyframeWait(DesktopStreamServerSessionContext* strea
 
 // 쓸 수 있는 화면이 없는 뷰어를 키프레임 대기로 세운다.
 //
-// RearmKeyframeWait 와 두 가지가 다르다.
+// RecordIncompleteFrame 과 두 가지가 다르다.
 //
 // 첫째, self-healing 을 보지 않는다. 여기 오는 뷰어는 참조 프레임도
 // SPS/PPS 도 맞지 않아서 refresh 파도로 복원될 것이 없다. 프레임 몇 장을
@@ -499,7 +487,7 @@ bool StreamingServer::BroadcastEncodedFrame(const uint8_t* encodedData, uint32_t
 			// 첫 화면이 없는 뷰어뿐이고(신규 구독 / 스트림 정보 변경),
 			// 그 뷰어에게는 참조 프레임도 SPS/PPS 도 없어서 refresh 파도로는
 			// 아무것도 복원되지 않는다. 프레임을 놓쳤을 뿐인 뷰어는
-			// RearmKeyframeWait 가 표시를 세우지 않으므로 여기 걸리지 않는다.
+			// RecordIncompleteFrame 이 표시를 세우지 않으므로 여기 걸리지 않는다.
 			if (streamContext->IsWaitingForKeyframe() && !isKeyFrame)
 			{
 				m_viewerTakingFrame[viewerIndex] = false;
@@ -523,7 +511,7 @@ bool StreamingServer::BroadcastEncodedFrame(const uint8_t* encodedData, uint32_t
 				// 인코더의 IDR 강제를 되살린다.
 				m_viewerTakingFrame[viewerIndex] = false;
 				CountUp(m_statChunksFailed);
-				RearmKeyframeWait(streamContext);
+				RecordIncompleteFrame(streamContext);
 			}
 		}
 
@@ -577,7 +565,7 @@ void StreamingServer::AbortFrameForTakingViewers(ClientSession** viewers, uint32
 		if (!isKeyFrame)
 			continue;
 
-		RearmKeyframeWait(GetStreamContext(viewers[viewerIndex]));
+		RecordIncompleteFrame(GetStreamContext(viewers[viewerIndex]));
 	}
 }
 
@@ -625,28 +613,6 @@ void StreamingServer::OnClientDisconnect(ISession* session, DisconnectReason rea
 
 void StreamingServer::OnReceive(ISession* session, uint16_t packetId, const char* packetData, uint32_t packetSize)
 {
-	// 여기 이런 로그가 있었다.
-	//
-	//   const char* payload = packetData + sizeof(PACKET_HEADER);
-	//   Logger::Log(LOG_INFO, "... Size: %d, %d, %s", ..., packetSize, payload);
-	//
-	// 두 가지가 잘못돼 있었다.
-	//
-	//   payload 를 %s 로 찍었다. 패킷 본문은 바이너리이고 NUL 로 끝나지
-	//   않는다. printf 계열은 0 바이트를 만날 때까지 읽으므로 수신 링
-	//   버퍼 밖으로 나간다 — 운이 좋아 안 죽었을 뿐인 경계 밖 읽기다.
-	//
-	//   그리고 LOG_INFO 다. 로거의 기본 레벨이 INFO 라 패킷 하나마다
-	//   콘솔에 한 줄씩 나갔다. 부하 상황에서는 이 한 줄이 처리 자체보다
-	//   비싸다.
-	//
-	// 남길 가치가 있는 것은 "무엇이 왔는가" 뿐이고, 그건 디버그 레벨이면
-	// 충분하다.
-	//
-	// Logger::Log 가 아니라 LOGD 를 쓴다. 레벨 검사가 함수 안에 있으면
-	// 로그가 꺼져 있어도 GetSessionID() 가 먼저 평가되는데, 그건 가상
-	// 함수라 제거되지 않는다. 매크로는 꺼진 로그를 비교 한 번으로 줄인다.
-	// (Logger.h 의 매크로 주석)
 	LOGD("session %u recv packet id %u (%u bytes)", session->GetSessionID(), packetId, packetSize);
 
 	// 잡 생성 + 큐 적재 + 세션 스케줄을 엔진이 한 번에 처리한다.
@@ -872,6 +838,7 @@ uint32_t StreamingServer::BroadcastStreamInfo()
 
 	return notified;
 }
+
 bool StreamingServer::HandleUnsubscribe(ClientSession* session, uint32_t streamId)
 {
 	if (!session || streamId != DESKTOP_STREAM_ID_PRIMARY)

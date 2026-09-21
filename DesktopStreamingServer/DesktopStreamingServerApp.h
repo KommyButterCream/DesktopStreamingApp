@@ -434,7 +434,7 @@ public:
 		printf_s(
 			"[stats] capture %s cap=%llu skip=%llu drop=%llu timeout=%llu lost=%llu | "
 			"encode sub=%llu done=%llu lost=%llu pend=%u qdrop=%llu faulted=%d noslot=%llu prep=%llu subfail=%llu | "
-			"net viewers=%u offer=%llu deliver=%llu novw=%llu abort=%llu chunkfail=%llu rearm=%llu idr=%llu | "
+			"net viewers=%u offer=%llu deliver=%llu novw=%llu abort=%llu chunkfail=%llu incomplete=%llu idr=%llu | "
 			"fb reports=%llu vwDiscard=%llu vwDecDrop=%llu rate=%.1fMbps\n",
 			captureState,
 			captureStats.capturedFrames, captureStats.skippedFrames, captureStats.droppedFrames,
@@ -749,7 +749,7 @@ private:
 			return;
 		}
 
-		printf_s("[bitrate] %.1f -> %.1f Mbps (%s : chunkFail %llu, rearm %llu, discard %llu, decodeDrop %llu)\n",
+		printf_s("[bitrate] %.1f -> %.1f Mbps (%s : chunkFail %llu, incomplete %llu, discard %llu, decodeDrop %llu)\n",
 			m_currentBitrateBps / 1'000'000.0, nextBitrate / 1'000'000.0,
 			congested ? "congested" : "recovering",
 			static_cast<unsigned long long>(chunkFailDelta),
