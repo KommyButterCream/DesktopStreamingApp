@@ -35,12 +35,12 @@ namespace
 
 	inline uint64_t ReadCount(const volatile LONG64& counter)
 	{
-		return static_cast<uint64_t>(::InterlockedCompareExchange64(const_cast<volatile LONG64*>(&counter), 0, 0));
+		return static_cast<uint64_t>(::ReadAcquire64(&counter));
 	}
 
 	inline bool ReadFlag(const volatile LONG& flag)
 	{
-		return ::InterlockedCompareExchange(const_cast<volatile LONG*>(&flag), FALSE, FALSE) != FALSE;
+		return ::ReadAcquire(&flag) != FALSE;
 	}
 }
 

@@ -36,7 +36,7 @@ class DesktopStreamServerSessionContext final : public SessionContext
 public:
 	bool IsSubscribed() const
 	{
-		return ::InterlockedCompareExchange(const_cast<volatile LONG*>(&m_subscribed), FALSE, FALSE) != FALSE;
+		return ::ReadAcquire(&m_subscribed) != FALSE;
 	}
 
 	void SetSubscribed(bool subscribed)
@@ -46,7 +46,7 @@ public:
 
 	bool IsWaitingForKeyframe() const
 	{
-		return ::InterlockedCompareExchange(const_cast<volatile LONG*>(&m_waitingForKeyframe), FALSE, FALSE) != FALSE;
+		return ::ReadAcquire(&m_waitingForKeyframe) != FALSE;
 	}
 
 	void SetWaitingForKeyframe(bool waiting)
@@ -56,7 +56,7 @@ public:
 
 	uint32_t GetStreamId() const
 	{
-		return static_cast<uint32_t>(::InterlockedCompareExchange(const_cast<volatile LONG*>(&m_streamId), 0, 0));
+		return static_cast<uint32_t>(::ReadAcquire(&m_streamId));
 	}
 
 	void SetStreamId(uint32_t streamId)
@@ -89,7 +89,7 @@ class DesktopStreamClientSessionContext final : public SessionContext
 public:
 	bool IsSubscribed() const
 	{
-		return ::InterlockedCompareExchange(const_cast<volatile LONG*>(&m_subscribed), FALSE, FALSE) != FALSE;
+		return ::ReadAcquire(&m_subscribed) != FALSE;
 	}
 
 	void SetSubscribed(bool subscribed)
@@ -99,7 +99,7 @@ public:
 
 	bool IsReassembling() const
 	{
-		return ::InterlockedCompareExchange(const_cast<volatile LONG*>(&m_reassembling), FALSE, FALSE) != FALSE;
+		return ::ReadAcquire(&m_reassembling) != FALSE;
 	}
 
 	void SetReassembling(bool reassembling)

@@ -39,7 +39,7 @@ namespace
 
 	inline uint64_t ReadCount(const volatile LONG64& counter)
 	{
-		return static_cast<uint64_t>(::InterlockedCompareExchange64(const_cast<volatile LONG64*>(&counter), 0, 0));
+		return static_cast<uint64_t>(::ReadAcquire64(&counter));
 	}
 }
 
@@ -150,7 +150,7 @@ void StreamingServer::GetStats(DesktopStreamingServerStats& stats) const
 	stats.bytesQueued = ReadCount(m_statBytesQueued);
 
 	stats.subscribedViewerCount =
-		static_cast<uint32_t>(::InterlockedCompareExchange(const_cast<volatile LONG*>(&m_subscribedViewerCount), 0, 0));
+		static_cast<uint32_t>(::ReadAcquire(&m_subscribedViewerCount));
 }
 
 void StreamingServer::ResetStats()
@@ -183,7 +183,7 @@ void StreamingServer::ResetStats()
 // 카운터를 읽으면 된다.
 bool StreamingServer::HasSubscribedViewer() const
 {
-	return ::InterlockedCompareExchange(const_cast<volatile LONG*>(&m_subscribedViewerCount), 0, 0) > 0;
+	return ::ReadAcquire(&m_subscribedViewerCount) > 0;
 }
 
 // 이쪽도 캡처 스레드가 매 프레임 부른다. 이 답이 인코더의 IDR 강제를
@@ -230,7 +230,7 @@ void StreamingServer::SetMinKeyFrameIntervalMs(uint32_t intervalMs)
 uint32_t StreamingServer::GetMinKeyFrameIntervalMs() const
 {
 	return static_cast<uint32_t>(
-		::InterlockedCompareExchange(const_cast<volatile LONG*>(&m_minKeyFrameIntervalMs), 0, 0));
+		::ReadAcquire(&m_minKeyFrameIntervalMs));
 }
 
 // 인코드 스레드가 매 프레임 부른다. (사정은 헤더 주석)
@@ -241,7 +241,7 @@ bool StreamingServer::ShouldForceKeyFrame()
 {
 	const LONG64 now = static_cast<LONG64>(::GetTickCount64());
 	const LONG64 interval = static_cast<LONG64>(GetMinKeyFrameIntervalMs());
-	const LONG64 last = ::InterlockedCompareExchange64(&m_lastForcedKeyFrameTick, 0, 0);
+	const LONG64 last = ::ReadAcquire64(&m_lastForcedKeyFrameTick);
 
 	if (last != 0 && interval > 0 && (now - last) < interval)
 		return false;
@@ -266,7 +266,7 @@ void StreamingServer::SetStreamSelfHealing(bool enabled)
 
 bool StreamingServer::IsStreamSelfHealing() const
 {
-	return ::InterlockedCompareExchange(const_cast<volatile LONG*>(&m_streamSelfHealing), 0, 0) != FALSE;
+	return ::ReadAcquire(&m_streamSelfHealing) != FALSE;
 }
 
 // 프레임을 완성하지 못한 뷰어를 처리한다.
@@ -697,7 +697,7 @@ uint32_t StreamingServer::GetSubscribedViewerSnapshot(ClientSession*** viewers)
 	if (!viewers || !m_subscribedViewerSnapshot)
 		return 0;
 
-	if (::InterlockedCompareExchange(&m_viewerSnapshotDirty, FALSE, FALSE) != FALSE)
+	if (::ReadAcquire(&m_viewerSnapshotDirty) != FALSE)
 	{
 		RebuildSubscribedViewerSnapshot();
 	}
