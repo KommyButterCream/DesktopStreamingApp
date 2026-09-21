@@ -72,6 +72,26 @@ public:
 	// (그 사정은 m_subscribedViewerCount 선언부 주석)
 	bool HasSubscribedViewer() const;
 
+	// --- 키프레임 ---
+	//
+	// 이 레이어에서 '키프레임' 은 새 뷰어가 거기서부터 디코딩을 시작할 수
+	// 있는 프레임을 뜻한다. 코덱이 무엇인지는 알지 않는다 — 그건
+	// DESKTOP_STREAM_CODEC_TYPE 로 협상하는 값이고, 여기서 필요한 것은
+	// "진입점인가" 하나다.
+	//
+	// 지금 코덱인 H.264 에서 그것은 IDR 이다. 판정은 인코더가 한다.
+	//   packet.isKeyFrame = (pictureType == NV_ENC_PIC_TYPE_IDR)
+	// 그 값이 BroadcastEncodedFrame 의 isKeyFrame 으로 들어온다.
+	//
+	// IDR 이 아닌 I 프레임은 진입점이 아니다. 자기 완결이긴 하지만 뒤의
+	// 프레임이 그 앞을 계속 참조할 수 있어서, 거기서 합류한 디코더는
+	// 없는 참조를 찾게 된다. 그래서 인코더가 그런 프레임을 만들지 않도록
+	// 설정해 두었다(ApplyInitOnlyConfig 주석).
+	//
+	// intra refresh 가 켜져 있어도 키프레임은 사라지지 않는다. 사라진 것은
+	// '주기적' IDR 뿐이고, 강제 IDR 이 유일한 진입점 공급원으로 남는다.
+	// (SetStreamSelfHealing 주석)
+
 	// 키프레임을 기다리는 뷰어가 있는가. 사실을 그대로 답한다.
 	bool HasViewerWaitingForKeyframe() const;
 
