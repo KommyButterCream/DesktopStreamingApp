@@ -1100,14 +1100,30 @@ StreamingClient
         <strong>한 코덱에서 VUI·GOP·VBV 를 정확히 맞추는 쪽</strong>에 시간을 썼다.</li>
   </ul>
 
+  <h3>이번에 고친 것</h3>
+  <ul>
+    <li><strong>셰이더 경로를 DLL 자기 위치 기준으로</strong> — 뷰어가
+        <code>D3DReadFileToBlob(L"../Shaders/X.cso")</code> 로 <strong>작업 디렉터리 기준</strong> 상대 경로를
+        넘기고 있었다. 그래서 <strong>누가 어느 폴더에서 실행했는가</strong>가 결과를 정했다 —
+        프로젝트 폴더에서 F5 로 띄우면 맞고, exe 를 자기 출력 폴더에서 실행하면
+        <code>x64\Release\..\Shaders</code> 를 보게 되어 초기화가 실패했다.</li>
+    <li>증상이 <strong>"D3D11ImageView 초기화 실패" 한 줄</strong>뿐이라 원인과 거리가 멀었다.
+        실제로 이 세션에서 다른 변경을 검증하다 마주쳤고, <code>git stash</code> A/B 로
+        <strong>선행 문제임을 확인</strong>한 뒤에야 경로 문제로 좁혀졌다.</li>
+    <li>이제 <code>GetModuleHandleEx</code> 로 이 DLL 의 위치를 찾아 그 기준으로 후보 셋
+        (<code>Shaders\</code>, <code>..\Shaders\</code>, <code>..\..\Shaders\</code>)을 순서대로 확인한다.
+        작업 디렉터리와 무관하고, 예전 경로도 마지막에 한 번 더 시도해 기존 호스트를 깨지 않는다.
+        <strong>출력 폴더 실행과 프로젝트 폴더 실행 양쪽에서 확인했다</strong> — 각각 1,197 / 897 프레임 유실 0.</li>
+  </ul>
+
   <h3>남아 있는 것</h3>
   <ul>
     <li><strong>클라이언트 쪽 게이트 경합</strong> — 서버는 디바이스를 나눴지만 클라이언트는
         디코더와 뷰어가 별도 엔진이면서도 렌더 부하가 커지면 같은 문제가 재현될 수 있다.
         측정에서 렌더러 점유율 72% 일 때 인코드 지연이 4.8배까지 늘었다.</li>
-    <li><strong>셰이더 경로가 CWD 상대</strong> — 뷰어가 <code>../Shaders/*.cso</code> 를 작업 디렉터리
-        기준으로 읽는다. 출력 폴더에서 실행하면 초기화에 실패한다.
-        모듈 경로 기준으로 바꿔야 한다.</li>
+    <li><strong>셰이더 파일 배치가 솔루션마다 다르다</strong> — 로딩 자체는 DLL 자기 위치 기준으로
+        고쳤지만(아래), <code>Shaders/</code> 폴더가 솔루션 루트에 있는 배치와 DLL 옆에 있는 배치가
+        섞여 있다. 빌드 후 복사 단계를 넣어 <strong>DLL 옆 하나로 통일</strong>하는 것이 맞다.</li>
     <li><strong>뷰어 수에 따른 비트레이트 자동 조정 없음</strong> — 뷰어가 늘면 송신 총량이
         비례해 늘지만 목표 비트레이트는 고정이다. 적응 제어가 혼잡을 보고 내리기는 하지만
         <strong>사후 대응</strong>이다.</li>
