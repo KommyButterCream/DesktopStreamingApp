@@ -16,3 +16,8 @@ obj/
 
 # 검증 하네스 (로컬 전용, 커밋하지 않는다)
 /tools/
+
+# 발표·포트폴리오 작업물 (로컬 전용)
+# node_modules 와 생성물(pptx, png)이 섞여 있어 소스로 다루지 않는다.
+/DesktopStreamingServer/docs/
+/DesktopStreamingServer/presentation_work/
