@@ -1,0 +1,1145 @@
+﻿<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DesktopStreamingApp</title>
+<style>
+:root{
+  --ink:#131a22; --ink-2:#48566a; --ink-3:#7b8798;
+  --paper:#f7f9fc; --paper-2:#edf2f8; --paper-3:#e2e9f2;
+  --rule:#d3dce8; --rule-2:#b7c3d4;
+  --signal:#2a6099; --signal-2:#1c4573; --signal-soft:#e8f0f9;
+  --ok:#2f6b5e; --warn:#8a6420; --bad:#a34038;
+  --mono:"Cascadia Mono","JetBrains Mono","Consolas","D2Coding",ui-monospace,monospace;
+  --sans:"Pretendard","Pretendard Variable","Segoe UI Variable Text","Segoe UI",
+         -apple-system,"Malgun Gothic",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ink:#dde5ef; --ink-2:#9caaba; --ink-3:#6d7b8c;
+    --paper:#0e1319; --paper-2:#151d26; --paper-3:#1d2630;
+    --rule:#27313d; --rule-2:#374553;
+    --signal:#6aa6de; --signal-2:#8dc0ef; --signal-soft:#122234;
+    --ok:#6cae9d; --warn:#c6a04e; --bad:#df8a80;
+  }
+}
+:root[data-theme="dark"]{
+  --ink:#dde5ef; --ink-2:#9caaba; --ink-3:#6d7b8c;
+  --paper:#0e1319; --paper-2:#151d26; --paper-3:#1d2630;
+  --rule:#27313d; --rule-2:#374553;
+  --signal:#6aa6de; --signal-2:#8dc0ef; --signal-soft:#122234;
+  --ok:#6cae9d; --warn:#c6a04e; --bad:#df8a80;
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0; background:var(--paper); color:var(--ink);
+  font-family:var(--sans); font-size:16px; line-height:1.75}
+.wrap{max-width:1180px; margin:0 auto; padding:0 20px}
+
+header.top{border-bottom:1px solid var(--rule); background:var(--paper-2)}
+.top .wrap{padding-block:52px 40px}
+.eyebrow{font-family:var(--mono); font-size:11.5px; letter-spacing:.16em;
+  text-transform:uppercase; color:var(--signal); margin:0 0 14px}
+h1{margin:0; font-size:clamp(30px,5.2vw,50px); line-height:1.1;
+  letter-spacing:-.02em; font-weight:660; text-wrap:balance}
+.tagline{margin:16px 0 0; max-width:66ch; font-size:17px; color:var(--ink-2); text-wrap:pretty}
+.chips{display:flex; flex-wrap:wrap; gap:7px; margin-top:26px; padding:0; list-style:none}
+.chips li{font-family:var(--mono); font-size:11.5px; letter-spacing:.03em;
+  border:1px solid var(--rule-2); border-radius:2px; padding:3px 9px;
+  color:var(--ink-2); background:var(--paper)}
+
+.shell{display:grid; grid-template-columns:210px minmax(0,1fr); gap:56px; align-items:start}
+nav.toc{position:sticky; top:24px; padding-block:48px 24px; font-size:13.5px}
+nav.toc ol{list-style:none; margin:0; padding:0; counter-reset:toc}
+nav.toc li{counter-increment:toc; margin:0 0 3px}
+nav.toc a{display:grid; grid-template-columns:22px 1fr; gap:6px;
+  color:var(--ink-3); text-decoration:none; padding:3px 0; line-height:1.45}
+nav.toc a::before{content:counter(toc,decimal-leading-zero); font-family:var(--mono);
+  font-size:10.5px; color:var(--rule-2); padding-top:3px}
+nav.toc a:hover{color:var(--signal)}
+main{padding-block:48px 100px; min-width:0}
+
+section{margin:0 0 68px; scroll-margin-top:20px}
+h2{margin:0 0 6px; font-size:25px; letter-spacing:-.015em; font-weight:640;
+  line-height:1.25; text-wrap:balance}
+.sub{margin:0 0 26px; color:var(--ink-3); font-size:14.5px; max-width:68ch}
+h3{margin:34px 0 10px; font-size:17.5px; font-weight:640; letter-spacing:-.01em}
+h4{margin:24px 0 6px; font-size:14px; font-weight:660; color:var(--ink-2);
+  font-family:var(--mono); letter-spacing:.02em}
+p{margin:0 0 14px; max-width:70ch; text-wrap:pretty}
+ul,ol{margin:0 0 14px; padding-left:20px; max-width:70ch}
+li{margin:0 0 6px}
+strong{font-weight:660}
+code{font-family:var(--mono); font-size:.885em; background:var(--paper-3);
+  padding:1px 5px; border-radius:2px; word-break:break-word}
+a{color:var(--signal)}
+
+.facts{display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr));
+  gap:1px; background:var(--rule); border:1px solid var(--rule); margin:0 0 28px}
+.facts div{background:var(--paper); padding:16px 18px}
+.facts dt{font-family:var(--mono); font-size:10.5px; letter-spacing:.11em;
+  text-transform:uppercase; color:var(--ink-3); margin:0 0 6px}
+.facts dd{margin:0; font-size:20px; font-weight:640; letter-spacing:-.01em;
+  font-variant-numeric:tabular-nums}
+.facts dd small{display:block; font-size:12px; font-weight:400; color:var(--ink-3);
+  letter-spacing:0; margin-top:3px; line-height:1.5}
+
+.note{border-left:2px solid var(--signal); background:var(--signal-soft);
+  padding:14px 18px; margin:20px 0; max-width:70ch}
+.note p{margin:0 0 8px} .note p:last-child{margin:0}
+.note .lbl{font-family:var(--mono); font-size:10.5px; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--signal-2); display:block; margin-bottom:5px}
+
+pre{margin:16px 0; padding:15px 17px; overflow-x:auto;
+  background:var(--paper-2); border:1px solid var(--rule);
+  font-family:var(--mono); font-size:12.5px; line-height:1.68; color:var(--ink-2); tab-size:4}
+pre b{color:var(--ink); font-weight:600}
+pre i{color:var(--ink-3); font-style:normal}
+pre em{color:var(--signal); font-style:normal; font-weight:600}
+.cap{font-size:12.5px; color:var(--ink-3); margin:-8px 0 20px; font-family:var(--mono)}
+
+.tw{overflow-x:auto; margin:18px 0 22px; border:1px solid var(--rule)}
+table{border-collapse:collapse; width:100%; font-size:13.5px; min-width:560px}
+th,td{text-align:left; padding:9px 13px; border-bottom:1px solid var(--rule); vertical-align:top}
+thead th{background:var(--paper-2); font-family:var(--mono); font-size:10.5px;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--ink-3);
+  font-weight:500; white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+td code{background:transparent; padding:0; font-size:12.5px}
+.num{font-variant-numeric:tabular-nums; white-space:nowrap; text-align:right}
+th.num{text-align:right}
+
+ol.steps{list-style:none; padding:0; counter-reset:s; max-width:78ch}
+ol.steps>li{counter-increment:s; position:relative; padding:0 0 16px 40px;
+  border-left:1px solid var(--rule); margin:0 0 0 11px}
+ol.steps>li:last-child{border-left-color:transparent; padding-bottom:0}
+ol.steps>li::before{content:counter(s); position:absolute; left:-11px; top:0;
+  width:22px; height:22px; border-radius:50%; background:var(--paper);
+  border:1px solid var(--rule-2); color:var(--ink-3);
+  font-family:var(--mono); font-size:11px; display:grid; place-items:center}
+ol.steps>li b{display:block; margin-bottom:2px; font-weight:640}
+ol.steps>li p{margin:0; font-size:14.5px; color:var(--ink-2)}
+
+.opt{display:grid; gap:1px; background:var(--rule); border:1px solid var(--rule); margin:22px 0}
+.opt article{background:var(--paper); padding:18px 20px}
+.opt h4{margin:0 0 4px; font-family:var(--sans); font-size:16px; color:var(--ink);
+  letter-spacing:-.01em; font-weight:640}
+.opt .where{font-family:var(--mono); font-size:11px; color:var(--ink-3); margin:0 0 10px}
+.opt p{margin:0 0 9px; font-size:14.5px; max-width:none}
+.opt p:last-child{margin:0}
+.gain{display:inline-block; font-family:var(--mono); font-size:11.5px;
+  color:var(--signal-2); border:1px solid var(--signal); background:var(--signal-soft);
+  padding:1px 7px; border-radius:2px; margin-top:4px}
+.gain.no{color:var(--ink-3); border-color:var(--rule-2); background:var(--paper-2)}
+
+figure{margin:22px 0; padding:0}
+figure svg{display:block; width:100%; height:auto; max-width:100%}
+figcaption{font-size:12.5px; color:var(--ink-3); margin-top:8px; font-family:var(--mono)}
+.svgbox{border:1px solid var(--rule); background:var(--paper-2); padding:18px 16px; overflow-x:auto}
+
+.tag{font-family:var(--mono); font-size:11px; padding:1px 6px; border-radius:2px; white-space:nowrap}
+.t-ok{color:var(--ok); border:1px solid currentColor}
+.t-warn{color:var(--warn); border:1px solid currentColor}
+.t-bad{color:var(--bad); border:1px solid currentColor}
+
+/* ---------- module cards ---------- */
+.mods{display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+  gap:1px; background:var(--rule); border:1px solid var(--rule); margin:22px 0}
+.mods article{background:var(--paper); padding:16px 18px}
+.mods h4{margin:0 0 3px; font-family:var(--mono); font-size:13px; color:var(--ink);
+  letter-spacing:0; font-weight:660}
+.mods .role{font-size:12.5px; color:var(--signal-2); margin:0 0 8px; font-family:var(--sans)}
+.mods p{margin:0 0 7px; font-size:13.5px; max-width:none; color:var(--ink-2); line-height:1.6}
+.mods p:last-child{margin:0}
+.mods .k{font-family:var(--mono); font-size:11px; color:var(--ink-3)}
+
+/* ---------- before/after bar chart ---------- */
+.chart{border:1px solid var(--rule); background:var(--paper); padding:16px 18px; margin:18px 0}
+.chart + .chart{margin-top:-1px}
+.chart-h{font-size:14.5px; font-weight:640; color:var(--ink); margin:0 0 3px; letter-spacing:-.01em}
+.chart-h span{font-family:var(--mono); font-size:11px; font-weight:400; color:var(--ink-3); margin-left:7px; letter-spacing:0}
+.chart-note{font-size:12.5px; color:var(--ink-3); margin:0 0 13px; max-width:none}
+.crow{display:grid; grid-template-columns:minmax(118px,204px) 1fr 96px; gap:12px; align-items:center; margin:0 0 7px}
+.crow:last-of-type{margin-bottom:0}
+.crow .lbl{font-size:12.5px; color:var(--ink-2); line-height:1.35}
+.crow .lbl em{font-style:normal; font-family:var(--mono); font-size:11px; color:var(--ink-3)}
+.crow .track{background:var(--paper-3); height:19px; border:1px solid var(--rule); position:relative}
+.crow .bar{height:100%; display:block}
+.bar.before{background:var(--rule-2)}
+.bar.after{background:var(--signal)}
+.crow .val{font-family:var(--mono); font-size:12.5px; font-variant-numeric:tabular-nums;
+  color:var(--ink); text-align:right; white-space:nowrap}
+.crow.win .val{color:var(--signal-2); font-weight:600}
+.delta{margin-top:11px; padding-top:10px; border-top:1px solid var(--rule);
+  font-family:var(--mono); font-size:12px; color:var(--signal-2); line-height:1.6}
+.delta b{color:var(--ink); font-weight:600}
+
+footer{border-top:1px solid var(--rule); background:var(--paper-2)}
+footer .wrap{padding-block:26px 40px; font-size:13px; color:var(--ink-3)}
+
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr; gap:0}
+  nav.toc{position:static; padding-block:32px 0; border-bottom:1px solid var(--rule)}
+  nav.toc ol{columns:2; column-gap:24px}
+  main{padding-block:32px 64px}
+}
+@media (max-width:620px){
+  .crow{grid-template-columns:1fr; gap:3px}
+  .crow .val{text-align:left}
+}
+@media (max-width:520px){
+  nav.toc ol{columns:1}
+  .top .wrap{padding-block:36px 28px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <p class="eyebrow">Real-time Remote Desktop Streaming · Server + Client</p>
+    <h1>DesktopStreamingApp</h1>
+    <p class="tagline">
+      데스크톱 화면을 QHD 60fps 로 캡처·인코딩해 여러 뷰어에게 실시간 송출하는 시스템.
+      캡처·코덱·전송·표시를 <strong>독립 DLL 6개</strong>로 나누고, 앱은 그것들을 엮어
+      <strong>파이프라인과 적응 제어, 장애 복구</strong>를 담당한다.
+    </p>
+    <ul class="chips">
+      <li>C++20</li><li>Direct3D 11</li><li>DXGI Desktop Duplication</li>
+      <li>NVENC / NVDEC</li><li>CUDA</li><li>IOCP / TCP</li>
+      <li>공유 텍스처 (keyed mutex)</li><li>적응 비트레이트</li><li>지터 버퍼</li>
+    </ul>
+  </div>
+</header>
+
+<div class="wrap shell">
+
+<nav class="toc" aria-label="목차">
+  <ol>
+    <li><a href="#s1">한눈에</a></li>
+    <li><a href="#s2">시스템 구성</a></li>
+    <li><a href="#s3">왜 DLL 로 나눴나</a></li>
+    <li><a href="#s4">전체 파이프라인</a></li>
+    <li><a href="#s5">모듈 간 데이터 전달</a></li>
+    <li><a href="#s6">서버 앱의 조립</a></li>
+    <li><a href="#s7">클라이언트 앱의 조립</a></li>
+    <li><a href="#s8">프로토콜</a></li>
+    <li><a href="#s9">적응 제어</a></li>
+    <li><a href="#s10">장애 복구</a></li>
+    <li><a href="#s11">개선 전후</a></li>
+    <li><a href="#s12">사용 기술</a></li>
+    <li><a href="#s13">트레이드오프와 한계</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ============================= 1 ============================= -->
+<section id="s1">
+  <h2>한눈에</h2>
+  <p class="sub">목표 동작점과, 실제로 그렇게 도는지 확인한 값.</p>
+
+  <dl class="facts">
+    <div><dt>스트림</dt><dd>2560×1440<small>60 fps · H.264 · 20 Mbps (최대 25)</small></dd></div>
+    <div><dt>구성</dt><dd>1 : N<small>서버 하나에 뷰어 여럿 · TCP 유니캐스트</small></dd></div>
+    <div><dt>엔드투엔드 유실</dt><dd>0<small>1,199 프레임 송출 · parsed=decoded=delivered</small></dd></div>
+    <div><dt>표시 페이싱</dt><dd>92 %<small>지터 버퍼가 실제로 흡수한 프레임 비율</small></dd></div>
+    <div><dt>독립 DLL</dt><dd>6 개<small>캡처 · 코덱 · 전송 · 표시 · 엔진 · UI</small></dd></div>
+    <div><dt>앱 계층 코드</dt><dd>4,805 줄<small>모듈을 엮는 부분만 · 모듈 본체는 별도</small></dd></div>
+  </dl>
+
+  <p>
+    이 시스템의 어려움은 개별 기술이 아니라 <strong>경계</strong>에 있었다.
+    캡처는 GPU 텍스처를 만들고, 인코더는 다른 GPU 디바이스에서 그걸 읽어야 하고,
+    전송은 그 결과를 여러 뷰어에게 복사 없이 뿌려야 하고, 디코더는 다시 텍스처로
+    되돌려야 한다. <strong>각 경계마다 다른 도구가 필요하다.</strong>
+  </p>
+  <p>
+    그리고 어느 한 곳이 막히면 증상이 항상 다른 곳에서 나타난다 — "화면이 안 나온다" 는
+    캡처·인코딩·전송·디코딩 어디서든 나올 수 있다. 그래서 이 앱이 하는 일의 절반은
+    <strong>어느 단계가 막혔는지 구분할 수 있게 만드는 것</strong>이다.
+  </p>
+</section>
+
+<!-- ============================= 2 ============================= -->
+<section id="s2">
+  <h2>시스템 구성</h2>
+  <p class="sub">DLL 6개 + 앱 2개 + 서비스 계층. 각 모듈은 자기 저장소에 별도 문서가 있다.</p>
+
+  <div class="mods">
+    <article>
+      <h4>D3D11DuplicateEngine.dll</h4>
+      <p class="role">화면 캡처</p>
+      <p>DXGI Desktop Duplication · 4슬롯 락프리 프레임 풀 · 접근 상실 자동 재연결 ·
+      변화 없는 프레임 건너뛰기 · 주기 타이머 페이싱</p>
+      <p class="k">내보내는 것 → KEYEDMUTEX 공유 텍스처 + slotId</p>
+    </article>
+
+    <article>
+      <h4>NvCodec.dll</h4>
+      <p class="role">H.264 인코딩 / 디코딩</p>
+      <p>NVENC 비동기 슬롯 링 · 완료 스레드 분리 · intra refresh · 런타임 비트레이트 재설정 ·
+      NVDEC 파서 콜백 · CUDA NV12→BGRA 커널</p>
+      <p class="k">받는 것 ← 공유 텍스처 · 내보내는 것 → H.264 비트스트림 / 공유 텍스처</p>
+    </article>
+
+    <article>
+      <h4>IOCPNetworkEngine.dll</h4>
+      <p class="role">전송</p>
+      <p>IOCP 워커 + 세션 스케줄러 · TLS 3계층 메모리 풀 · 수신 백프레셔 ·
+      참조계수 브로드캐스트 · 하트비트</p>
+      <p class="k">받는 것 ← 패킷 · 내보내는 것 → 핸들러 콜백</p>
+    </article>
+
+    <article>
+      <h4>D3D11ImageView.dll</h4>
+      <p class="role">표시</p>
+      <p>임베디드 뷰어 창 · 공유 텍스처 직접 표시 · 온디맨드 렌더 스레드 ·
+      줌/팬 · 오버레이 / ROI</p>
+      <p class="k">받는 것 ← 공유 텍스처 핸들</p>
+    </article>
+
+    <article>
+      <h4>D3D11Engine.dll</h4>
+      <p class="role">공통 D3D11 기반</p>
+      <p>디바이스·컨텍스트 수명 · <code>ID3D11ImmediateContextGate</code> ·
+      렌더 컨텍스트 · 셰이더</p>
+      <p class="k">네 모듈이 전부 이 위에 선다</p>
+    </article>
+
+    <article>
+      <h4>Core.lib / D3D11UIFramework.dll</h4>
+      <p class="role">유틸리티 · UI</p>
+      <p><code>ThreadBase</code> · <code>WaitableTimer</code> · 안전 해제 ·
+      도형 타입 / 툴바 · 상태바 · 컨텍스트 메뉴</p>
+      <p class="k">모듈 공통 기반</p>
+    </article>
+  </div>
+
+  <h3>앱과 서비스 계층</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>구성</th><th>역할</th><th class="num">줄 수</th></tr></thead>
+      <tbody>
+        <tr><td><code>DesktopStreamingServer/</code></td>
+            <td>캡처 → 인코더 → 브로드캐스트 조립 · 적응 비트레이트 · 장애 복구 · 지표</td><td class="num">1,189</td></tr>
+        <tr><td><code>DesktopStreamingClient/</code></td>
+            <td>수신 → 디코더 → 뷰어 조립 · 지터 버퍼 · 재접속 · 피드백 보고</td><td class="num">735</td></tr>
+        <tr><td><code>Service/StreamingServer/</code></td>
+            <td>IOCP 엔진 위의 스트리밍 서버 — 구독 관리 · 청크 분할 · 뷰어 팬아웃</td><td class="num">1,396</td></tr>
+        <tr><td><code>Service/StreamingClient/</code></td>
+            <td>IOCP 엔진 위의 스트리밍 클라이언트 — 재조립 · 피드백 송신</td><td class="num">846</td></tr>
+        <tr><td><code>Service/StreamingProtocol/</code></td>
+            <td>패킷 정의 · 세션 컨텍스트 · 프로파일 기반 설정 계산</td><td class="num">639</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================= 3 ============================= -->
+<section id="s3">
+  <h2>왜 DLL 로 나눴나</h2>
+  <p class="sub">모듈화 자체가 목적이 아니었다. 경계마다 이유가 따로 있다.</p>
+
+  <h3>1. 재사용 대상이 실제로 있다</h3>
+  <p>
+    <code>D3D11ImageView</code> 와 <code>IOCPNetworkEngine</code> 은 이 시스템 전용이 아니다.
+    뷰어는 검사 장비 UI 에, 네트워크 엔진은 다른 서버에 들어간다.
+    <strong>스트리밍이 그 모듈들의 한 사용처</strong>이지 그 반대가 아니다.
+  </p>
+
+  <h3>2. 검증 단위를 나눌 수 있다</h3>
+  <p>
+    각 모듈이 <strong>자기 하네스를 따로</strong> 갖는다 — <code>NvEncodeBench</code>(회귀 18케이스),
+    <code>IOCPNetworkEngine/tools</code>(23개), <code>TestHost</code>(뷰어).
+    엔진 전체 처리량으로는 <strong>어느 부품이 병목인지 가릴 수 없다.</strong>
+    실제로 IOCP 엔진에서 락프리 큐 두 개와 분산 수집 송신을 <strong>부품 벤치로 재고 기각</strong>했다.
+  </p>
+
+  <h3>3. 디바이스 경계가 이미 나뉘어 있다</h3>
+  <p>
+    캡처와 인코더는 <strong>서로 다른 D3D11 디바이스</strong>를 쓴다(뒤에 이유가 나온다).
+    같은 프로세스 안에서도 이미 자원이 분리돼 있으므로, 코드도 그 선을 따라 나누는 편이
+    경계를 흐리지 않는다.
+  </p>
+
+  <h3>4. ABI 경계가 설계를 강제한다</h3>
+  <p>
+    DLL 경계를 넘으려면 STL 타입을 헤더에 노출할 수 없고, 콜백은 함수 포인터여야 하고,
+    수명 규약을 문서로 적어야 한다. <strong>귀찮지만 그 제약이 인터페이스를 단순하게 만든다.</strong>
+  </p>
+  <p>
+    <code>NvCodec</code> 의 <code>_Impl</code> pimpl 이 그 예다 — <code>nvEncodeAPI.h</code> 와 CUDA 헤더가
+    사용자 쪽으로 새지 않고, SDK 버전을 올려도 <strong>사용자 재컴파일을 강제하지 않는다.</strong>
+  </p>
+
+  <div class="note">
+    <span class="lbl">나누지 않은 것도 있다</span>
+    <p><code>Service/</code> 계층은 DLL 이 아니라 <strong>앱과 같이 빌드되는 소스</strong>다.
+    스트리밍 프로토콜은 이 앱 전용이라 재사용 대상이 없고, 서버와 클라이언트가
+    <strong>같은 패킷 정의를 공유해야</strong> 하므로 헤더 하나로 두는 편이 안전하다.</p>
+    <p>경계를 긋는 기준은 "나눌 수 있는가" 가 아니라 <strong>"따로 검증하고 따로 배포할 이유가 있는가"</strong> 였다.</p>
+  </div>
+</section>
+
+<!-- ============================= 4 ============================= -->
+<section id="s4">
+  <h2>전체 파이프라인</h2>
+  <p class="sub">화면 한 장이 서버 GPU 에서 뷰어 화면까지. 각 단계의 담당 모듈과 스레드.</p>
+
+  <figure>
+    <div class="svgbox">
+      <svg viewBox="0 0 1000 620" role="img" aria-label="서버의 캡처, 인코딩, 브로드캐스트와 클라이언트의 수신, 디코딩, 표시로 이어지는 전체 파이프라인">
+        <defs>
+          <marker id="fa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/></marker>
+          <marker id="fs" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--signal)"/></marker>
+        </defs>
+        <g font-family="var(--mono)" font-size="10.5" fill="var(--ink-2)">
+
+          <!-- SERVER -->
+          <text x="14" y="22" fill="var(--signal)" font-size="10.5" letter-spacing="1.4">SERVER PROCESS</text>
+          <rect x="10" y="30" width="980" height="256" fill="none" stroke="var(--rule-2)" stroke-dasharray="4 3"/>
+
+          <text x="26" y="52" fill="var(--ink-3)">캡처 디바이스 (D3D11 #1)</text>
+          <rect x="22" y="60" width="300" height="94" fill="var(--paper)" stroke="var(--signal)"/>
+          <rect x="34" y="72" width="128" height="34" fill="var(--paper-3)" stroke="var(--rule)"/>
+          <text x="98" y="93" text-anchor="middle" fill="var(--ink)">Desktop Duplication</text>
+          <rect x="174" y="72" width="136" height="34" fill="var(--paper-3)" stroke="var(--rule)"/>
+          <text x="242" y="93" text-anchor="middle" fill="var(--ink)">4슬롯 공유 풀</text>
+          <text x="34" y="124" fill="var(--ink-3)">변화 없으면 여기서 끝 (LastPresentTime == 0)</text>
+          <text x="34" y="140" fill="var(--ink-3)">캡처 스레드 · 60Hz 주기 타이머</text>
+          <line x1="164" y1="89" x2="170" y2="89" stroke="var(--ink-3)" marker-end="url(#fa)"/>
+
+          <text x="352" y="52" fill="var(--ink-3)">인코더 디바이스 (D3D11 #2)</text>
+          <rect x="348" y="60" width="330" height="94" fill="var(--paper)" stroke="var(--signal)"/>
+          <rect x="360" y="72" width="96" height="34" fill="var(--paper-3)" stroke="var(--rule)"/>
+          <text x="408" y="93" text-anchor="middle" fill="var(--ink)">BGRA 복사</text>
+          <rect x="466" y="72" width="96" height="34" fill="var(--paper-3)" stroke="var(--rule)"/>
+          <text x="514" y="93" text-anchor="middle" fill="var(--ink)">NV12 변환</text>
+          <rect x="572" y="72" width="94" height="34" fill="var(--paper-3)" stroke="var(--rule)"/>
+          <text x="619" y="93" text-anchor="middle" fill="var(--ink)">NVENC</text>
+          <text x="360" y="124" fill="var(--ink-3)">엔코드 스레드 (제출) + 완료 스레드 (회수)</text>
+          <text x="360" y="140" fill="var(--ink-3)">슬롯 링 4 · 완료 이벤트 · intra refresh</text>
+          <line x1="458" y1="89" x2="462" y2="89" stroke="var(--ink-3)" marker-end="url(#fa)"/>
+          <line x1="564" y1="89" x2="568" y2="89" stroke="var(--ink-3)" marker-end="url(#fa)"/>
+
+          <!-- device boundary -->
+          <line x1="336" y1="44" x2="336" y2="168" stroke="var(--signal)" stroke-dasharray="5 3"/>
+          <text x="336" y="182" text-anchor="middle" fill="var(--signal-2)">디바이스 경계 — keyed mutex 공유 텍스처 · slotId 만 건넨다</text>
+          <line x1="314" y1="89" x2="344" y2="89" stroke="var(--signal)" marker-end="url(#fs)"/>
+
+          <text x="708" y="52" fill="var(--ink-3)">전송</text>
+          <rect x="704" y="60" width="276" height="94" fill="var(--paper)" stroke="var(--rule-2)"/>
+          <rect x="716" y="72" width="118" height="34" fill="var(--paper-3)" stroke="var(--rule)"/>
+          <text x="775" y="93" text-anchor="middle" fill="var(--ink)">32KB 청크 분할</text>
+          <rect x="846" y="72" width="122" height="34" fill="var(--signal-soft)" stroke="var(--signal)"/>
+          <text x="907" y="93" text-anchor="middle" fill="var(--ink)">뷰어 N 팬아웃</text>
+          <text x="716" y="124" fill="var(--ink-3)">SharedSendPacket 참조계수 — 청크 하나를</text>
+          <text x="716" y="140" fill="var(--ink-3)">복사 없이 모든 뷰어 큐에 넣는다</text>
+          <line x1="670" y1="89" x2="700" y2="89" stroke="var(--ink-3)" marker-end="url(#fa)"/>
+          <line x1="836" y1="89" x2="842" y2="89" stroke="var(--ink-3)" marker-end="url(#fa)"/>
+
+          <rect x="22" y="200" width="956" height="72" fill="var(--paper-2)" stroke="var(--rule)"/>
+          <text x="36" y="222" fill="var(--ink)" font-size="12">서버 앱이 담당하는 것 — 모듈은 각자 자기 일만 한다</text>
+          <text x="36" y="242">프레임 핸들 중계 (slotId) · 반납 콜백 · IDR 강제 질의 · 적응 비트레이트 · 해상도 변경 시 인코더 재생성 · 장애 복구 상한 · 통합 지표</text>
+          <text x="36" y="260" fill="var(--ink-3)">캡처는 인코더를 모르고, 인코더는 네트워크를 모른다. 셋을 아는 것은 앱 하나뿐이다.</text>
+
+          <!-- network -->
+          <rect x="380" y="300" width="240" height="40" fill="var(--paper-3)" stroke="var(--rule-2)"/>
+          <text x="500" y="325" text-anchor="middle" fill="var(--ink)" font-size="12">TCP / IOCP · 뷰어당 유니캐스트</text>
+          <path d="M907 158 L907 320 L624 320" fill="none" stroke="var(--ink-3)" marker-end="url(#fa)"/>
+          <path d="M376 320 L120 320 L120 360" fill="none" stroke="var(--ink-3)" marker-end="url(#fa)"/>
+
+          <!-- CLIENT -->
+          <text x="14" y="360" fill="var(--signal)" font-size="10.5" letter-spacing="1.4">CLIENT PROCESS</text>
+          <rect x="10" y="368" width="980" height="180" fill="none" stroke="var(--rule-2)" stroke-dasharray="4 3"/>
+
+          <rect x="24" y="386" width="140" height="56" fill="var(--paper)" stroke="var(--rule-2)"/>
+          <text x="94" y="408" text-anchor="middle" fill="var(--ink)">청크 재조립</text>
+          <text x="94" y="426" text-anchor="middle" font-size="10">chunkIndex 순서 검증</text>
+
+          <rect x="184" y="386" width="140" height="56" fill="var(--paper)" stroke="var(--rule-2)"/>
+          <text x="254" y="408" text-anchor="middle" fill="var(--ink)">디코더 유입 큐</text>
+          <text x="254" y="426" text-anchor="middle" font-size="10">버퍼로 복사 · 깊이 8</text>
+
+          <rect x="344" y="386" width="170" height="56" fill="var(--paper)" stroke="var(--signal)"/>
+          <text x="429" y="408" text-anchor="middle" fill="var(--ink)">NVDEC + CUDA 커널</text>
+          <text x="429" y="426" text-anchor="middle" font-size="10">파서 콜백 · NV12 → BGRA</text>
+
+          <rect x="534" y="386" width="150" height="56" fill="var(--signal-soft)" stroke="var(--signal)"/>
+          <text x="609" y="408" text-anchor="middle" fill="var(--ink)">지터 버퍼</text>
+          <text x="609" y="426" text-anchor="middle" font-size="10">순번 → 목표 시각 · 16ms</text>
+
+          <rect x="704" y="386" width="150" height="56" fill="var(--paper)" stroke="var(--rule-2)"/>
+          <text x="779" y="408" text-anchor="middle" fill="var(--ink)">D3D11ImageView</text>
+          <text x="779" y="426" text-anchor="middle" font-size="10">공유 텍스처 직접 표시</text>
+
+          <line x1="166" y1="414" x2="180" y2="414" stroke="var(--ink-3)" marker-end="url(#fa)"/>
+          <line x1="326" y1="414" x2="340" y2="414" stroke="var(--ink-3)" marker-end="url(#fa)"/>
+          <line x1="516" y1="414" x2="530" y2="414" stroke="var(--signal)" marker-end="url(#fs)"/>
+          <line x1="686" y1="414" x2="700" y2="414" stroke="var(--signal)" marker-end="url(#fs)"/>
+
+          <text x="24" y="466" fill="var(--ink-3)">IOCP 워커 → 세션 스케줄러</text>
+          <text x="344" y="466" fill="var(--ink-3)">디코드 스레드 (파서 콜백이 같은 스레드에서 동기 호출)</text>
+          <text x="704" y="466" fill="var(--ink-3)">렌더 스레드 (온디맨드)</text>
+
+          <rect x="24" y="482" width="956" height="52" fill="var(--paper-2)" stroke="var(--rule)"/>
+          <text x="38" y="503" fill="var(--ink)" font-size="12">역방향 — 클라이언트가 초당 1회 28바이트 피드백을 보낸다</text>
+          <text x="38" y="521">framesCompleted / framesDiscarded / decodeDropped (증분) → 서버의 적응 비트레이트가 자기 송신 실패와 함께 읽는다</text>
+          <path d="M470 534 L470 560 L907 560 L907 158" fill="none" stroke="var(--signal)" stroke-dasharray="3 3" marker-end="url(#fs)"/>
+
+          <text x="14" y="596" fill="var(--ink-3)">픽셀이 시스템 메모리로 내려오는 지점은 인코딩된 비트스트림 하나뿐이다. 그 앞뒤는 전부 GPU 안에서 끝난다.</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>그림 1 — 모듈 넷과 두 프로세스. 파란 선이 프레임, 점선이 역방향 피드백이다.</figcaption>
+  </figure>
+
+  <h3>한 프레임의 여정</h3>
+  <ol class="steps">
+    <li><b>캡처 (캡처 스레드)</b>
+      <p>duplication 이 데스크톱 표면을 준다. <strong>화면이 안 바뀌었으면 여기서 끝</strong> —
+      복사도 발행도 하지 않는다. 바뀌었으면 4슬롯 풀 중 하나에 복사하고 최신 표식을 옮긴다.</p></li>
+
+    <li><b>중계 (캡처 스레드 → 앱)</b>
+      <p>앱이 <code>GetLatestFrameHandle()</code> 로 slotId 를 받아
+      <strong>텍스처 포인터는 버리고 slotId 만</strong> 인코더 큐에 넣는다.
+      포인터는 캡처 디바이스 것이라 인코더가 쓸 수 없다.</p></li>
+
+    <li><b>인코딩 (엔코드 스레드)</b>
+      <p>인코더가 slotId 로 <strong>자기가 초기화 때 열어 둔</strong> 공유 텍스처를 찾는다.
+      keyed mutex 를 잡고 BGRA 로 복사한 뒤 <strong>즉시 놓는다</strong> —
+      이후 NV12 변환과 NVENC 제출은 전부 인코더 디바이스 안의 일이다.</p></li>
+
+    <li><b>회수 (완료 스레드)</b>
+      <p>완료 이벤트를 기다렸다 비트스트림을 꺼내고 <strong>슬롯을 먼저 반납한 뒤</strong> 앱 콜백을 부른다.
+      캡처 슬롯 반납도 이 경로로 돌아간다.</p></li>
+
+    <li><b>브로드캐스트 (완료 스레드)</b>
+      <p>프레임을 32KB 청크로 자르고, 청크마다 <code>SharedSendPacket</code> 하나를 만들어
+      <strong>참조계수만 올리며</strong> 모든 뷰어 큐에 넣는다. 뷰어별로 <strong>전부-아니면-전무</strong>다.</p></li>
+
+    <li><b>수신·재조립 (IOCP 워커 → 스케줄러)</b>
+      <p>클라이언트가 <code>chunkIndex</code> 순서를 검증하며 512KB 재조립 버퍼에 채운다.
+      하나라도 어긋나면 그 프레임을 통째로 버린다.</p></li>
+
+    <li><b>디코딩 (디코드 스레드)</b>
+      <p><code>cuvidParseVideoData</code> 안에서 콜백 셋이 <strong>동기로</strong> 돈다.
+      마지막 콜백이 CUDA 커널로 NV12→BGRA 변환 후 D3D11 텍스처에 쓰고 이벤트를 기록한다.</p></li>
+
+    <li><b>페이싱·표시 (디코드 스레드)</b>
+      <p>프레임 순번으로 <strong>표시되어야 할 시각</strong>을 계산해 그때까지 기다렸다
+      뷰어에 공유 텍스처 핸들을 넘긴다. 뷰어는 자기 렌더 스레드에서 그린다.</p></li>
+  </ol>
+</section>
+
+<!-- ============================= 5 ============================= -->
+<section id="s5">
+  <h2>모듈 간 데이터 전달</h2>
+  <p class="sub">경계가 셋이고, 셋 다 다른 방법을 쓴다. 그 선택이 설계의 핵심이다.</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>경계</th><th>무엇이 건너가나</th><th>방법</th><th>왜</th></tr></thead>
+      <tbody>
+        <tr><td>캡처 → 인코더</td><td>GPU 텍스처 (QHD BGRA ≈ 14 MB)</td>
+            <td><strong>KEYEDMUTEX 공유 텍스처 + slotId</strong></td>
+            <td>디바이스가 달라 포인터를 넘길 수 없다. 복사하면 프레임당 14 MB</td></tr>
+        <tr><td>인코더 → 네트워크</td><td>H.264 비트스트림 (≈ 42 KB)</td>
+            <td><strong>콜백 + 참조계수 패킷</strong></td>
+            <td>뷰어 N 명에게 같은 바이트를 보낸다. 복사는 한 번만</td></tr>
+        <tr><td>네트워크 → 디코더</td><td>비트스트림 청크</td>
+            <td><strong>버퍼 복사</strong></td>
+            <td>수신 버퍼는 곧 재사용된다. 여기만 복사가 맞다</td></tr>
+        <tr><td>디코더 → 뷰어</td><td>GPU 텍스처</td>
+            <td><strong>공유 핸들</strong></td>
+            <td>뷰어가 자기 엔진을 따로 쓴다</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>경계 1 — 왜 디바이스를 나눴는가</h3>
+  <p>
+    처음에는 캡처와 인코더가 <strong>같은 D3D11 디바이스</strong>를 썼다. 30fps 에서는 잘 돌았고
+    60fps 에서 <strong>수십 프레임 만에 캡처가 영구히 멈췄다.</strong> 스택 덤프로 잡은 교착이다:
+  </p>
+<pre>캡처   ProcessCaptureFrame → <b>D3D11ImmediateContextGate::Enter</b>
+       → RtlAcquireSRWLockExclusive                    <em>(영구 대기)</em>
+
+인코드 SubmitFrame → nvEncodeAPI64 → d3d11 → nvwgf2umx
+       → WaitForSingleObjectEx                         <em>(게이트 보유)</em>
+</pre>
+  <p>
+    immediate context 를 지키는 게이트 하나를 두 스레드가 다퉜고, 인코더가 그걸 쥔 채
+    <strong>드라이버 안에서 무기한 블로킹</strong>했다. 캡처는 16ms 마다 그 게이트를 원하므로 통째로 죽었다.
+  </p>
+  <p>
+    <strong>락 규약을 다듬어서는 풀리지 않는 종류였다.</strong> 순환의 한 변이 드라이버 안에 있어서
+    우리가 그 대기를 놓아 줄 방법이 없다. 시도해서 아닌 것으로 확인한 것들 —
+    복사 완료 대기 켜기, 인코드 버퍼 4→8, <code>nvEncEncodePicture</code> 게이트 제거,
+    NV12 변환 뒤 Flush. (<code>nvEncMapInputResource</code> 의 게이트를 빼면 프로세스가 죽는다)
+  </p>
+  <p>
+    그래서 <strong>게이트 공유 자체를 없앴다.</strong> 인코더에 별도 디바이스를 주고, 캡처 풀을
+    KEYEDMUTEX 공유 텍스처로 만들어 인코더 디바이스가 <strong>초기화 때 한 번</strong> 열어 둔다.
+    두 컨텍스트가 독립이므로 인코더가 드라이버 안에서 얼마나 오래 기다리든 캡처는 영향받지 않는다.
+  </p>
+
+  <div class="note">
+    <span class="lbl">경계를 넘는 것은 slotId 하나뿐이다</span>
+    <p>앱은 <code>NvEncInputFrame::texture</code> 를 <strong>일부러 <code>nullptr</code> 로 둔다.</strong>
+    그 포인터는 캡처 디바이스의 것이고, 인코더는 <code>sourceSlotId</code> 로
+    자기가 미리 열어 둔 텍스처 4장 중 하나를 고른다.</p>
+    <p>매 프레임 <code>OpenSharedResource1</code> 을 부르는 것은 그 자체가 드라이버 왕복이다.
+    <strong>핸들을 한 번만 여는 것</strong>이 이 구조가 싼 이유다.</p>
+  </div>
+
+  <h3>경계 2 — 청크 하나를 뷰어 N 명에게</h3>
+  <p>
+    뷰어가 8명이면 같은 32KB 를 8번 보내야 한다. <strong>8번 복사할 이유는 없다.</strong>
+  </p>
+<pre>패킷 1개 생성 → <b>SharedSendPacket::Create</b>   <i>참조계수 1 (배포자 몫)</i>
+
+<b>for</b> 뷰어 in 구독자:
+    AddRef(packet)                            <i>계수만 올린다</i>
+    viewer-&gt;EnqueueSharedSendPacket(packet, ReleaseCallback)
+       실패하면 → Release(packet)              <i>놓는 것은 호출부 몫</i>
+
+Release(packet)                               <i>배포자 몫을 놓는다</i>
+<i>// 마지막 뷰어의 송신이 끝나면 계수가 0 이 되고 블록이 풀로 돌아간다</i>
+</pre>
+
+  <h3>경계 3 — 반납 경로가 역방향으로 흐른다</h3>
+  <p>
+    캡처 슬롯은 <strong>인코더가 다 쓴 뒤에</strong> 반납해야 한다. 그런데 인코더는 캡처를 모른다.
+    그래서 앱이 <code>SetFrameReleaseCallback</code> 으로 반납 훅을 걸어 둔다 —
+    인코더가 프레임을 다 썼거나 <strong>버렸을 때</strong> 그 콜백이 불리고, 앱이 캡처 슬롯을 돌려준다.
+  </p>
+  <p>
+    유입 큐가 latest-only 라 <strong>버려지는 경로가 정상</strong>이다. 반납을 성공 경로에만 걸어 두면
+    버려진 프레임의 캡처 슬롯이 영영 묶인다.
+  </p>
+</section>
+
+<!-- ============================= 6 ============================= -->
+<section id="s6">
+  <h2>서버 앱의 조립</h2>
+  <p class="sub">초기화 순서가 곧 의존 관계다. 그리고 그 순서를 틀리면 조용히 깨진다.</p>
+
+  <ol class="steps">
+    <li><b>D3D11 엔진 #1 (캡처용) · 게이트 켬</b>
+      <p>캡처 엔진이 이 디바이스를 쓴다.</p></li>
+    <li><b>캡처 엔진 — <code>SetFramePoolSharable(true)</code> 를 Initialize 전에</b>
+      <p>이게 구조의 출발점이다. 풀 텍스처가 KEYEDMUTEX 로 만들어진다.
+      <code>SetWaitForFrameCopyCompletion(false)</code> 도 같이 끈다 —
+      복사 완료를 CPU 쿼리로 기다리는 대신 <strong>keyed mutex 가 그 순서를 맡는다.</strong>
+      드라이버가 아는 동기화라 더 정확하고 더 싸다.</p></li>
+    <li><b>캡처 이벤트 콜백 등록</b>
+      <p>등록하지 않고 있던 시절이 있었다. 그래서 모니터 잠금·전체화면 전환·드라이버 갱신으로
+      캡처가 조용히 멈춰도 서버는 아무 일 없다는 듯 돌았고,
+      <strong>남는 증상은 "프레임이 안 온다" 뿐이었다.</strong></p></li>
+    <li><b>D3D11 엔진 #2 (인코더용) · 게이트 켬</b>
+      <p>게이트는 이 디바이스에도 필요하다 — 엔코드 스레드와 완료 스레드가 같은 컨텍스트를
+      쓰기 때문이다. 다만 <strong>그 둘은 캡처와 무관하다.</strong></p></li>
+    <li><b>인코더 생성 + 공유 풀 등록 + 콜백 4종</b>
+      <p>비트스트림 · 오류 · IDR 질의 · 프레임 반납.
+      해상도가 바뀌면 <strong>이 단계만 다시 탄다.</strong></p></li>
+    <li><b>스트림 정보 설정 → 서버 기동</b>
+      <p><code>SetStreamInfo</code> 가 <code>StartServer</code> 보다 먼저다 —
+      여기서 올린 버전이 구독 응답에 실려 나간다.</p></li>
+    <li><b>엔코드 스레드 → 캡처 스레드 순으로 시작</b>
+      <p>소비자를 먼저 세운다. 반대로 하면 첫 프레임들이 갈 곳이 없다.</p></li>
+  </ol>
+
+  <h3>기동 시점에 예산을 검산한다</h3>
+<pre>bytesPerFrameBudget = MAX_BITRATE_BPS / TARGET_FPS / 8
+                    = 25,000,000 / 60 / 8 = <b>52,083 바이트</b>
+
+프로토콜 프레임 상한  = <b>524,288 바이트</b>   →  <em>×10.1 여유</em>
+</pre>
+  <p>
+    CBR + 단일 프레임 VBV + <code>lowDelayKeyFrameScale = 1</code> 이라 프레임 크기가 이 예산
+    근처에 묶인다. 상한을 넘기면 브로드캐스트가 프레임을 <strong>통째로 거절</strong>하므로
+    (화면이 아예 안 나온다) 기동 시점에 여유를 찍어 둔다.
+  </p>
+
+  <h3>프레임률을 한 곳에서만 정한다</h3>
+  <p>
+    <code>TARGET_FPS = 60</code> 하나를 캡처(<code>SetTargetFps</code>), 인코더
+    (<code>frameRateNumerator</code>), 스트림 정보가 전부 쓴다.
+    <strong>예전에는 셋이 서로 다른 값을 들고 있었다</strong> — 레이트 컨트롤이 기준으로 삼는 fps 와
+    실제 투입 속도가 다르면 비트레이트가 그만큼 어긋난다.
+  </p>
+</section>
+
+<!-- ============================= 7 ============================= -->
+<section id="s7">
+  <h2>클라이언트 앱의 조립</h2>
+  <p class="sub">디코더와 뷰어가 <strong>서로 다른 D3D11 엔진</strong>을 쓴다. 이유는 서버와 같다.</p>
+
+<pre>D3D11 엔진 (디코더용)
+  └ D3D11NvDecoder
+       inputQueueDepth   = 8
+       maxPacketSize     = <b>DESKTOP_STREAM_MAX_FRAME_SIZE</b>   <i>큐가 패킷을 복사한다</i>
+       sharedOutputTextureMode = <b>true</b>                     <i>뷰어가 열어 갈 수 있게</i>
+       contextGate       = <em>nullptr</em>                       <i>이 컨텍스트를 쓰는 주체가 디코더뿐</i>
+
+D3D11ImageView                                             <i>자기 엔진을 따로 만든다</i>
+  └ Initialize(GetDesktopWindow(), RECT(0,0,1920,900), ...)
+       └ UpdateSharedTexture(frame.sharedHandle)            <i>매 프레임 핸들만 받는다</i>
+
+StreamingClient
+  └ 콜백: OnStreamInfo / OnEncodedFrame / OnDisconnect
+</pre>
+
+  <div class="note">
+    <span class="lbl">해상도를 클라이언트가 정하지 않는다</span>
+    <p>초기화 코드에 <code>outputWidth / outputHeight = 2560 / 1440</code> 이 있었다.
+    선언하고 0인지 검사한 뒤 <strong>아무 데도 쓰지 않았다.</strong></p>
+    <p>디코더는 비트스트림의 <strong>SPS 에서 해상도를 읽고</strong>, 뷰어는 공유 텍스처를 그대로 받는다.
+    서버가 알려주는 크기는 <code>OnStreamInfo</code> 로 온다. 세 경로 중 어디에도
+    클라이언트가 미리 아는 해상도가 필요하지 않다.</p>
+  </div>
+
+  <h3>앱 스레드가 하는 일</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>주기</th><th>하는 일</th><th>이유</th></tr></thead>
+      <tbody>
+        <tr><td>1,000 ms</td><td><strong>피드백 송신</strong> — 완성/폐기/디코드 드롭 증분 28바이트</td>
+            <td>서버는 자기 송신 실패만 볼 수 있다. "디코더가 못 따라간다" 는 여기서만 나온다</td></tr>
+        <tr><td>재접속 표시</td><td>백오프 후 재연결</td>
+            <td>콜백은 워커 스레드에서 오므로 표시만 남기고 실제 작업은 앱 스레드가 한다</td></tr>
+        <tr><td>주기</td><td>통계 출력 (수신 / 디코드 / 페이싱)</td>
+            <td>어느 단계가 막혔는지 구분</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>지터 버퍼 — 순번으로 표시 시각을 복원한다</h3>
+  <p>
+    60fps 면 프레임 간격이 16ms 다. 도착이 5ms 빨랐다 20ms 늦었다 하면 —
+    프레임을 하나도 잃지 않아도 — <strong>사람 눈에는 끊김으로 보인다.</strong>
+  </p>
+<pre>목표시각 = 기준시각 + (순번 − 기준순번) × (1000/fps) + <b>16ms</b>
+</pre>
+  <p>
+    <code>timestamp</code> 는 인코더가 넣은 <strong>프레임 순번</strong>이고 NVDEC 를 손상 없이 통과해
+    돌아온다. 서버 프레임 간격이 고정이니 순번만 있으면 표시 시각을 복원할 수 있다.
+  </p>
+  <p>
+    이르면 그만큼 자고, 늦었으면 그냥 표시한다. 기준이 100ms 이상 어긋나거나 250ms 이상
+    밀리면 기준을 다시 잡는다 — <strong>없으면 한 번 밀린 만큼 영원히 밀린 채로 간다.</strong>
+  </p>
+  <div class="tw">
+    <table>
+      <thead><tr><th>실측 (21초 구간)</th><th class="num">값</th><th>의미</th></tr></thead>
+      <tbody>
+        <tr><td>presented / waits</td><td class="num">1,196 / 1,106</td><td><strong>92%</strong> 가 페이싱을 탔다</td></tr>
+        <tr><td>avgWait</td><td class="num">8.8 ms</td><td>버퍼 깊이 16ms 의 절반쯤 — 적정</td></tr>
+        <tr><td>resync</td><td class="num">0</td><td>기준이 한 번도 깨지지 않았다</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================= 8 ============================= -->
+<section id="s8">
+  <h2>프로토콜</h2>
+  <p class="sub">패킷 4종. 설정은 상수가 아니라 <strong>스트림 프로파일에서 계산</strong>한다.</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>패킷</th><th>방향</th><th>목적</th></tr></thead>
+      <tbody>
+        <tr><td><code>SUBSCRIBE</code> / <code>UNSUBSCRIBE</code></td><td>C → S</td>
+            <td>구독 시작/해지. 구독 응답에 스트림 정보 버전이 실린다</td></tr>
+        <tr><td><code>STREAM_INFO</code></td><td>S → C</td>
+            <td>해상도 · fps · 코덱 · 버전 2종. 해상도가 바뀌면 다시 보낸다</td></tr>
+        <tr><td><code>FRAME_CHUNK</code></td><td>S → C</td>
+            <td>유일한 가변 길이 패킷. frameId · chunkIndex/Count · offset · 페이로드</td></tr>
+        <tr><td><code>FEEDBACK</code></td><td>C → S</td>
+            <td>수신 상태 증분 3종 + 보고 순번. 28바이트 · 초당 1회</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>패킷 크기가 <code>uint16_t</code> 인 것이 32KB 청크를 정했다</h3>
+  <p>
+    엔진의 <code>PACKET_HEADER::packetSize</code> 가 <code>uint16_t</code> 라 한 패킷이 65,535 바이트를
+    넘을 수 없다. 넘는 값을 적어 보내면 <strong>받는 쪽이 프로토콜 위반으로 보고 연결을 끊고,
+    보낸 쪽에는 원인 모를 피어 끊김만 남는다.</strong>
+  </p>
+  <p>
+    그래서 크기 계산 헬퍼가 <code>uint16_t</code> 를 돌려주고, 넘치면 <strong>0 을 돌려
+    호출부가 반드시 확인하게</strong> 만든다. 청크 32KB 는 그 안에서 고른 값이다.
+    <code>static_assert</code> 로 전제를 코드에 박아 뒀다.
+  </p>
+
+  <h3>설정을 프로파일에서 계산한다</h3>
+<pre><b>StreamProfile</b>  fps 60 · bitrate 20 Mbps · peakFrameFactor 4 · backlogMs 100
+
+평균 프레임    = 20,000,000 / 60 / 8      = <b>41.7 KB</b>  → 2 청크
+피크 프레임    = 41.7 KB × 4              = 167 KB      → 6 청크
+백로그         = 20 Mbps × 100ms / 8      = 250 KB      → 8 청크
+<em>송신 큐 깊이   = max(피크, 백로그) + 여유 = 12 청크</em>
+</pre>
+  <p>
+    예전에는 <strong>프로토콜 상한</strong>(512KB = 17청크)에서 잡았다. 실제 프레임은 2청크라
+    "4프레임 분량" 이라고 적어 둔 68엔트리가 <strong>실제로는 34프레임, 약 570ms</strong> 였다.
+    의도한 것의 8배를 붙들고 있었고, <strong>그 8배는 전부 지연</strong>이다.
+  </p>
+</section>
+
+<!-- ============================= 9 ============================= -->
+<section id="s9">
+  <h2>적응 제어</h2>
+  <p class="sub">제어 루프 셋. 각각 다른 신호를 보고 다른 것을 조절한다.</p>
+
+  <h3>1. 비트레이트 — 네 가지 혼잡 신호</h3>
+<pre>congested = chunkFailDelta &gt; 0      <i>송신 큐에 안 들어감        (서버가 봄)</i>
+         || incompleteDelta &gt; 0    <i>프레임 통째로 포기         (서버가 봄)</i>
+         || discardDelta &gt; 0       <i>재조립 실패                (뷰어가 알려줌)</i>
+         || decodeDropDelta &gt; 0    <i>디코더가 못 따라감          (뷰어가 알려줌)</i>
+
+혼잡  → <em>×0.75</em>  즉시
+깨끗  → <em>×1.15</em>  3구간 연속일 때만
+</pre>
+  <p>
+    <strong>내릴 때 빠르고 올릴 때 느린 것이 정석</strong>이다. 반대로 하면 경계에서 오르내리기를
+    반복하면서 화질이 계속 출렁인다.
+  </p>
+  <p>
+    <code>forceIdr</code> 은 false 다. 비트레이트만 바꾸는데 IDR 을 강제하면 그 프레임이
+    P 프레임의 몇 배가 되어 <strong>방금 줄이려던 혼잡을 악화시킨다.</strong>
+  </p>
+  <p>
+    뒤의 두 신호가 <strong>클라이언트 피드백에서만 나온다</strong>는 점이 중요하다.
+    링크가 멀쩡한데 뷰어 GPU 가 디코딩을 못 따라가는 경우, 서버 쪽에서는 완전히 조용하다.
+  </p>
+
+  <h3>2. 자가 치유 — 밀린 뷰어에게 IDR 을 요구하지 않는다</h3>
+  <p>
+    뷰어 하나가 프레임을 놓쳤다고 IDR 을 강제하면 <strong>그 프레임은 모든 뷰어가 받는다.</strong>
+    게다가 UltraLow 프리셋은 <code>lowDelayKeyFrameScale = 1</code> 이라 IDR 도 한 프레임 예산을
+    넘지 못한다 — 비트레이트가 튀는 대신 <strong>화질이 무너진다.</strong>
+    밀린 뷰어 하나가 전원의 화면을 깎는 구조고, 그 자체가 되먹임이다.
+  </p>
+  <p>
+    intra refresh 가 켜져 있으면 매 프레임 일부 띠가 intra 로 갱신되고 60프레임에 한 바퀴 돈다.
+    <strong>이미 화면을 갖고 있고 일부만 놓친 뷰어</strong>는 P 프레임만 받아도 복원된다.
+  </p>
+  <p class="cap">실측 — 디코더 앞에 90프레임(1.5초) 공백을 5회 반복 주입: 오류 0, idr=0, 화면 정상 복귀</p>
+  <p>
+    다만 <strong>쓸 화면이 아예 없는 뷰어</strong>(신규 구독 / 해상도 변경)는 다르다.
+    참조 프레임도 SPS/PPS 도 없어 refresh 파도로 복원될 것이 없다.
+    그쪽은 <strong>자가 치유와 무관하게 항상</strong> IDR 을 요구한다 — 두 경로를 다른 함수로 갈랐다.
+  </p>
+
+  <h3>3. 지터 버퍼 — 도착 흔들림을 표시 시각으로 되돌린다</h3>
+  <p>
+    앞 절에 있다. 여기서는 셋의 관계만 — <strong>비트레이트는 보낼 양을, 자가 치유는 무엇을 보낼지를,
+    지터 버퍼는 언제 보여줄지를</strong> 정한다. 셋 다 다른 층이라 서로 간섭하지 않는다.
+  </p>
+</section>
+
+<!-- ============================= 10 ============================= -->
+<section id="s10">
+  <h2>장애 복구</h2>
+  <p class="sub">끊기는 경로가 정상 경로다. 어디까지 자동으로 넘기고 어디서 멈출지를 정했다.</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>장애</th><th>감지</th><th>처리</th><th>상한</th></tr></thead>
+      <tbody>
+        <tr><td>모니터 잠금 · UAC · 전체화면 전환</td><td><code>AccessLost</code></td>
+            <td>캡처 엔진이 50→500ms 백오프로 재연결</td><td><span class="tag t-ok">무한 재시도</span></td></tr>
+        <tr><td>해상도 변경</td><td><code>ModeChanged</code></td>
+            <td>인코더 재생성 + <code>SetStreamInfo</code> 버전 올림 + 전 뷰어에 IDR 요구</td><td>—</td></tr>
+        <tr><td>GPU TDR · 드라이버 교체</td><td><code>DeviceRecreated</code></td>
+            <td>공유 핸들이 전부 무효 → 인코더 재생성 + 공유 풀 재등록</td><td>—</td></tr>
+        <tr><td>비트스트림 회수 실패</td><td><code>OutputReadFailed</code></td>
+            <td>프레임 1장 폐기, 파이프라인 유지</td><td>8회 연속 시 세션 포기</td></tr>
+        <tr><td>인코더 정지</td><td><code>EncoderFaulted</code></td>
+            <td>표시만 남기고 앱 스레드가 재생성</td><td><strong>60초 내 3회</strong></td></tr>
+        <tr><td>뷰어 접속 끊김</td><td>IOCP</td><td>구독 목록에서 제거 · 스냅샷 갱신</td><td>—</td></tr>
+        <tr><td>서버 다운</td><td>클라이언트</td><td>백오프 재접속 · 재접속 시 순번 리셋 허용</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>콜백 안에서 재생성하면 자기를 기다린다</h3>
+  <p>
+    캡처 이벤트 콜백은 <strong>캡처 스레드에서</strong> 불리고, 인코더 오류 콜백은
+    <strong>완료 스레드에서</strong> 불린다. 그 안에서 인코더를 <code>Destroy</code> 하면
+    그 스레드의 종료를 자기가 기다리게 된다.
+  </p>
+<pre><i>// 콜백은 표시만 남긴다</i>
+::InterlockedExchange(&amp;m_rebuildFromFault, TRUE);
+::InterlockedExchange(&amp;m_streamRebuildPending, TRUE);
+
+<i>// 실제 재생성은 앱 스레드의 ServiceStreamRebuild() 가 한다</i>
+</pre>
+
+  <h3>재생성 상한을 둔 이유</h3>
+  <p>
+    인코더가 계속 실패하는 원인(드라이버 문제, VRAM 고갈)이 재생성으로 풀리지 않으면
+    <strong>무한 재생성 루프</strong>가 된다. 60초 창에 3회를 넘으면 멈추고 그 사실을 남긴다.
+  </p>
+  <p class="cap">실측 — <code>DebugFailNextOutputs(16)</code> 으로 주입: 3회 복구 후 4회째 상한에서 정상 정지. 그 동안 클라이언트는 3,641 프레임을 드롭 없이 디코딩</p>
+
+  <div class="note">
+    <span class="lbl">테스트가 찾아낸 내 회귀</span>
+    <p>해상도 변경 경로를 실제로(2560×1440 → 1920×1080 → 복귀) 돌려 보니
+    <code>BroadcastStreamInfo</code> 가 <strong>자가 치유가 켜지면 단락되는 함수</strong>를 쓰고 있었다.
+    포맷이 바뀌었는데 IDR 을 요구하지 않는다는 뜻이다.</p>
+    <p>그런데 <strong>동작하는 것처럼 보였다</strong> — 재생성된 인코더가 첫 프레임을 IDR 로 내보내기
+    때문이다. 우연히 가려진 결함이었고, 요구 경로를 <strong>별도 함수로 갈라</strong> 고쳤다.</p>
+  </div>
+</section>
+
+<!-- ============================= 11 ============================= -->
+<section id="s11">
+  <h2>개선 전후</h2>
+  <p class="sub">앱 계층에서 바꾼 것들. 모듈 내부 개선은 각 모듈 문서에 있다.</p>
+
+  <div class="chart">
+    <div class="chart-h">송신 큐가 붙들고 있는 시간 <span>ms · 낮을수록 실시간</span></div>
+    <p class="chart-note">깊이를 프로토콜 상한이 아니라 실제 스트림 프로파일에서 계산하도록 바꿨다</p>
+
+    <div class="crow"><div class="lbl">상한 기준 68 엔트리 <em>(개선 전)</em></div>
+      <div class="track"><span class="bar before" style="width:100%"></span></div><div class="val">~570</div></div>
+    <div class="crow win"><div class="lbl">프로파일 기준 12 청크</div>
+      <div class="track"><span class="bar after" style="width:17.5%"></span></div><div class="val">~100</div></div>
+
+    <div class="delta"><b>5.7배</b> · "4프레임 분량" 이라고 적어 둔 것이 실제로는 34프레임이었다 —
+      실시간 스트리밍에서 <b>붙들린 프레임은 값어치가 없다</b></div>
+  </div>
+
+  <div class="chart">
+    <div class="chart-h">프레임당 청크 수 산정 근거 <span>청크</span></div>
+    <p class="chart-note">같은 20 Mbps 스트림을 어떤 기준으로 재느냐의 차이</p>
+
+    <div class="crow"><div class="lbl">프로토콜 상한 512 KB <em>(개선 전)</em></div>
+      <div class="track"><span class="bar before" style="width:100%"></span></div><div class="val">17</div></div>
+    <div class="crow win"><div class="lbl">실제 평균 41.7 KB</div>
+      <div class="track"><span class="bar after" style="width:11.8%"></span></div><div class="val">2</div></div>
+
+    <div class="delta">상한은 <b>일어나면 안 되는 일</b>을 막는 값이고 운영 파라미터가 아니다 —
+      그 둘을 같은 숫자로 쓴 것이 문제였다</div>
+  </div>
+
+  <div class="chart">
+    <div class="chart-h">인코더 재생성 시도 <span>회 · 60초 창</span></div>
+    <p class="chart-note"><code>DebugFailNextOutputs(16)</code> 으로 출력 실패를 강제 주입한 결과</p>
+
+    <div class="crow"><div class="lbl">상한 없음 <em>(개선 전)</em></div>
+      <div class="track"><span class="bar before" style="width:100%"></span></div><div class="val">무한</div></div>
+    <div class="crow win"><div class="lbl">60초 내 3회로 제한</div>
+      <div class="track"><span class="bar after" style="width:18.75%"></span></div><div class="val">3</div></div>
+
+    <div class="delta">재생성으로 풀리지 않는 원인이면 <b>무한 루프</b>가 된다 ·
+      실측에서 3회 복구 후 4회째 상한에 닿아 정상 정지, 그 동안 클라이언트 <b>3,641 프레임 드롭 0</b></div>
+  </div>
+
+  <div class="chart">
+    <div class="chart-h">키프레임 대기 표시가 잘못 내려가기까지 <span>프레임 · tools/framedrop</span></div>
+    <p class="chart-note">한 바이트도 읽지 않는 뷰어에 프레임을 계속 밀었을 때</p>
+
+    <div class="crow"><div class="lbl">청크 단위로 표시를 내림 <em>(개선 전)</em></div>
+      <div class="track"><span class="bar before" style="width:100%"></span></div><div class="val">243</div></div>
+    <div class="crow win"><div class="lbl">프레임 단위 전부-아니면-전무</div>
+      <div class="track"><span class="bar after" style="width:0%"></span></div><div class="val">뒤집히지 않음</div></div>
+
+    <div class="delta">키프레임의 0번 청크가 큐에 들어간 것만 보고 표시를 내렸다 ·
+      7번에서 막히면 그 뷰어는 <b>참조 프레임 없이 영구히 남는다</b></div>
+  </div>
+
+  <h3>구조를 바꾼 것들</h3>
+  <div class="opt">
+    <article>
+      <h4>캡처와 인코더의 D3D11 디바이스 분리</h4>
+      <p class="where">DesktopStreamingServerApp::Initialize</p>
+      <p>60fps 에서 수십 프레임 만에 캡처가 영구 정지하던 교착을 없앴다.
+      순환의 한 변이 드라이버 안에 있어 <strong>락 규약으로는 풀 수 없는</strong> 종류였다.</p>
+      <p>대가는 프레임당 공유 텍스처 복사 한 번(QHD BGRA 14 MB)이다.
+      그 값에 <strong>파이프라인 전체의 독립성</strong>을 샀다.</p>
+      <span class="gain">교착 제거 — 60fps 지속 가능</span>
+    </article>
+
+    <article>
+      <h4>IDR 강제를 묻는 자리를 하나로</h4>
+      <p class="where">KeyFrameRequestCallback</p>
+      <p>예전에는 <code>OnFrameCallback</code> 도 같은 질문을 해서 <code>EnqueueFrame</code> 의
+      플래그로 넘겼다. 두 가지가 나빴다.</p>
+      <p>큐가 latest-only 라 <strong>그 플래그를 단 프레임이 밀려 버려지면 요청도 같이 사라졌다.</strong>
+      그리고 최소 간격 토큰이 하나라, 두 곳에서 물으면 <strong>한쪽이 토큰을 가져가고
+      실제로 인코딩되는 경로가 못 받을</strong> 수 있었다.</p>
+      <span class="gain">요청 유실 제거</span>
+    </article>
+
+    <article>
+      <h4>프레임 단위 전부-아니면-전무 전송</h4>
+      <p class="where">StreamingServer::BroadcastEncodedFrame</p>
+      <p>청크 하나가 실패해도 계속 밀던 것을 고쳤다. 클라이언트는 어차피 그 프레임을 버리므로
+      뒤이은 청크는 <strong>이미 찬 큐를 더 채우는 순수한 낭비</strong>였다.</p>
+      <p>더 나빴던 것은 위 차트의 대기 표시 버그다. 지금은 아무도 이 프레임을 끝까지 받고
+      있지 않으면 <strong>남은 청크를 아예 만들지 않는다.</strong></p>
+      <span class="gain">낭비 제거 + 결함 제거</span>
+    </article>
+
+    <article>
+      <h4>지표를 단계별로 나눠 찍기</h4>
+      <p class="where">PrintStats</p>
+      <p><code>cap=0</code> 하나로는 <strong>세 가지를 구분할 수 없다</strong> — 화면이 안 변해서 건너뛴 것
+      (<code>skip</code>), duplication 이 아무것도 주지 않는 것(<code>timeout</code>),
+      접근을 잃은 것(<code>accessLost</code>). <strong>처방이 셋 다 다르다.</strong></p>
+      <p>지금은 캡처 상태와 카운터를 한 줄에 같이 찍는다. 인코드·네트워크·피드백도 같은 방식이다.</p>
+      <span class="gain">진단 시간 단축</span>
+    </article>
+  </div>
+
+  <h3>실제 운영 확인</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>구간</th><th>서버</th><th>클라이언트</th></tr></thead>
+      <tbody>
+        <tr><td>21초 · 뷰어 1</td>
+            <td><code>sub=1274 done=1274 lost=0</code><br><code>deliver=1274 chunkfail=0 incomplete=0 idr=1</code></td>
+            <td><code>frames=1199 discarded=0</code><br><code>parsed=decoded=delivered=1196</code></td></tr>
+        <tr><td>50초 연속 ×3</td><td colspan="2"><code>sub = done</code>, 유실 0 · 재접속 0</td></tr>
+        <tr><td>해상도 변경 왕복</td><td colspan="2">2560×1440 → 1920×1080 → 복귀. 인코더 재생성 + 전 뷰어 IDR 재동기</td></tr>
+        <tr><td>장애 주입</td><td colspan="2">출력 실패 16회 → 3회 복구 + 상한 정지 · 디코딩 3,641 프레임 드롭 0</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================= 12 ============================= -->
+<section id="s12">
+  <h2>사용 기술</h2>
+  <p class="sub">이 시스템을 만들면서 실제로 쓴 것들. 어디에 왜 썼는지까지.</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>영역</th><th>기술</th><th>이 시스템에서 쓰인 자리</th></tr></thead>
+      <tbody>
+        <tr><td rowspan="4"><strong>그래픽 / GPU</strong></td>
+            <td>Direct3D 11</td><td>캡처·인코딩·디코딩·표시 전 단계. 디바이스 2개 분리 운용</td></tr>
+        <tr><td>DXGI Desktop Duplication</td><td>화면 캡처, dirty/move rect, 커서 정보</td></tr>
+        <tr><td>공유 텍스처 (NT 핸들 + keyed mutex)</td><td>디바이스 간 프레임 전달 — 이 시스템의 중심 기법</td></tr>
+        <tr><td>Direct2D / DirectWrite</td><td>뷰어의 오버레이·ROI·UI 레이어</td></tr>
+
+        <tr><td rowspan="3"><strong>비디오 코덱</strong></td>
+            <td>NVENC (H.264)</td><td>비동기 슬롯 링, 완료 이벤트, intra refresh, 런타임 재설정</td></tr>
+        <tr><td>NVDEC / CUVID</td><td>파서 콜백 3종, 출력 슬롯 링, CUDA 이벤트</td></tr>
+        <tr><td>CUDA</td><td>NV12 → BGRA 변환 커널, D3D11 interop 매핑</td></tr>
+
+        <tr><td rowspan="3"><strong>네트워크</strong></td>
+            <td>Winsock2 / IOCP</td><td><code>AcceptEx</code> 사전 게시, GQCS 워커 풀, 세션 스케줄러</td></tr>
+        <tr><td>TCP 수신 윈도 백프레셔</td><td>잡 큐가 깊어지면 <code>WSARecv</code> 를 걸지 않아 송신측을 막는다</td></tr>
+        <tr><td>참조계수 브로드캐스트</td><td>청크 하나를 복사 없이 뷰어 N 명에게</td></tr>
+
+        <tr><td rowspan="5"><strong>동시성</strong></td>
+            <td>락프리 슬롯 프로토콜</td><td>캡처 프레임 풀 — CAS 선점 + 재확인, ABA 를 frameId 로 차단</td></tr>
+        <tr><td>원자 연산 / 메모리 순서</td><td>acquire 읽기, Dekker 패턴(StoreLoad), <code>alignas(64)</code> 캐시 라인 분리</td></tr>
+        <tr><td>SRWLOCK + 조건변수</td><td>유입 큐 — 기다리는 것이 목적인 자리</td></tr>
+        <tr><td>Win32 동기화 객체</td><td>완료 이벤트, 수동 리셋 정지 이벤트, 고해상도 waitable timer</td></tr>
+        <tr><td>TLS 메모리 풀</td><td>3계층 (스레드 캐시 → 전역 SLIST → 세그먼트)</td></tr>
+
+        <tr><td rowspan="3"><strong>시스템</strong></td>
+            <td>DLL 설계 / ABI 경계</td><td>pimpl, 함수 포인터 콜백, 수명 규약 문서화</td></tr>
+            <tr><td>IOCP 수명 관리</td><td>미완료 I/O 회계, 지연 반납, 취소 재발행</td></tr>
+        <tr><td>Windows 표시 설정</td><td>해상도 변경 감지 및 파이프라인 재구성</td></tr>
+
+        <tr><td rowspan="3"><strong>실시간 제어</strong></td>
+            <td>적응 비트레이트</td><td>4신호 혼잡 감지, 비대칭 조정(×0.75 / ×1.15)</td></tr>
+        <tr><td>지터 버퍼</td><td>프레임 순번 기반 표시 시각 복원, 기준 재동기</td></tr>
+        <tr><td>레이트 컨트롤 튜닝</td><td>CBR, 단일 프레임 VBV, <code>lowDelayKeyFrameScale</code>, BT.709 full range VUI</td></tr>
+
+        <tr><td rowspan="3"><strong>검증 / 진단</strong></td>
+            <td>전용 하네스</td><td>부품 벤치(풀·큐·syscall) + 엔드투엔드 + 장애 주입, 총 40여 개</td></tr>
+        <tr><td>장애 주입 훅</td><td><code>DebugFailNextOutputs</code>, <code>DebugSimulateAccessLoss</code></td></tr>
+        <tr><td>단계별 지표</td><td>캡처/인코드/전송/디코드 카운터를 한 줄에 — 어디가 막혔는지 가른다</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <span class="lbl">기술보다 방법이 남았다</span>
+    <p>이 목록에서 반복되는 패턴이 셋 있다.</p>
+    <p><strong>경계를 정하고 그 경계에 맞는 도구를 고른다</strong> — GPU 간에는 공유 텍스처,
+    스레드 간에는 원자 연산, 프로세스 간에는 패킷. 하나로 덮으려 하면 어딘가 과하거나 모자라다.</p>
+    <p><strong>재고 나서 판단한다</strong> — 락프리 큐 두 개, 분산 수집 송신, 디스패치 스레드,
+    타일 워커 풀. 넷 다 재고 기각했다. 측정 없이 했다면 넷 다 구현했을 것이다.</p>
+    <p><strong>실패의 등급을 나눈다</strong> — 프레임 1장 유실과 세션 포기를 같은 코드로 다루면
+    복구 가능한 상황에서 죽거나 복구 불가능한 상황에서 조용히 얼어붙는다.</p>
+  </div>
+</section>
+
+<!-- ============================= 13 ============================= -->
+<section id="s13">
+  <h2>트레이드오프와 한계</h2>
+  <p class="sub">고르지 않은 것들, 그리고 남은 것.</p>
+
+  <h3>의도적으로 포기한 것</h3>
+  <ul>
+    <li><strong>UDP / FEC</strong> — TCP 유니캐스트다. 손실 복구를 전송 계층에 맡기는 대신
+        재조립 실패를 그냥 프레임 폐기로 처리한다. LAN 을 전제한 선택이고,
+        인터넷 경로로 가려면 이 결정부터 바꿔야 한다.</li>
+    <li><strong>멀티캐스트</strong> — 뷰어마다 같은 바이트를 따로 보낸다.
+        서버 송신량이 <strong>비트레이트 × 뷰어 수</strong>라 20 Mbps × 8 = 160 Mbps 로
+        기가비트 LAN 안에 든다. 뷰어가 수십이면 다시 봐야 한다.</li>
+    <li><strong>오디오</strong> — 화면만 보낸다. 요구에 없었다.</li>
+    <li><strong>H.265 / AV1</strong> — H.264 고정. 코덱 선택을 설정으로 빼는 대신
+        <strong>한 코덱에서 VUI·GOP·VBV 를 정확히 맞추는 쪽</strong>에 시간을 썼다.</li>
+  </ul>
+
+  <h3>남아 있는 것</h3>
+  <ul>
+    <li><strong>클라이언트 쪽 게이트 경합</strong> — 서버는 디바이스를 나눴지만 클라이언트는
+        디코더와 뷰어가 별도 엔진이면서도 렌더 부하가 커지면 같은 문제가 재현될 수 있다.
+        측정에서 렌더러 점유율 72% 일 때 인코드 지연이 4.8배까지 늘었다.</li>
+    <li><strong>셰이더 경로가 CWD 상대</strong> — 뷰어가 <code>../Shaders/*.cso</code> 를 작업 디렉터리
+        기준으로 읽는다. 출력 폴더에서 실행하면 초기화에 실패한다.
+        모듈 경로 기준으로 바꿔야 한다.</li>
+    <li><strong>뷰어 수에 따른 비트레이트 자동 조정 없음</strong> — 뷰어가 늘면 송신 총량이
+        비례해 늘지만 목표 비트레이트는 고정이다. 적응 제어가 혼잡을 보고 내리기는 하지만
+        <strong>사후 대응</strong>이다.</li>
+    <li><strong>재현되지 않은 종료 하나</strong> — 원자 읽기 전환 검증 중 서버가 15초 만에
+        조용히 종료된 일이 있다(<code>0x0000087d</code>, KERNELBASE). A/B 와 3회 재실행으로
+        재현되지 않았고 변경과 연결 짓지 못했다. <strong>기록으로 남겨 뒀다.</strong></li>
+  </ul>
+
+  <h3>이 시스템에서 얻은 것</h3>
+  <p>
+    가장 크게 배운 것은 <strong>통합이 부품보다 어렵다</strong>는 점이다.
+    캡처도 인코딩도 전송도 각각은 동작했는데, 셋을 붙이자 60fps 에서 죽었다.
+    원인은 어느 모듈의 버그도 아니었고 <strong>두 모듈이 자원 하나를 공유한다는 사실</strong>이었다.
+    그런 문제는 모듈 안에서는 보이지 않고, <strong>모듈 단위 테스트로도 잡히지 않는다.</strong>
+  </p>
+  <p>
+    그래서 이 앱 계층이 실제로 하는 일의 절반은 파이프라인 조립이 아니라
+    <strong>어느 단계가 막혔는지 구분할 수 있게 만드는 것</strong>이 됐다 —
+    단계별 카운터, 상태 표시, 장애 주입 훅. 만들 때는 부수적으로 보였는데
+    <strong>결과적으로 가장 많이 쓴 코드</strong>다.
+  </p>
+</section>
+
+</main>
+</div>
+
+<footer>
+  <div class="wrap">
+    DesktopStreamingApp · 기술 자료 · 모듈별 상세 문서는 각 저장소의 <code>docs/portfolio.html</code> ·
+    D3D11DuplicateEngine / NvCodec / IOCPNetworkEngine / D3D11ImageView
+  </div>
+</footer>
+
+</body>
+</html>
