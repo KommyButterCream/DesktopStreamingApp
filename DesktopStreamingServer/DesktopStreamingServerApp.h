@@ -335,7 +335,7 @@ public:
 
 	bool IsRunning() const
 	{
-		return ::InterlockedCompareExchange(const_cast<volatile LONG*>(&m_running), 0, 0) != FALSE;
+		return ::ReadAcquire(&m_running) != FALSE;
 	}
 
 	void Shutdown()

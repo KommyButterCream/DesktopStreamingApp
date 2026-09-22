@@ -203,7 +203,7 @@ public:
 
 	bool IsRunning() const
 	{
-		return ::InterlockedCompareExchange(const_cast<volatile LONG*>(&m_running), 0, 0) != FALSE;
+		return ::ReadAcquire(&m_running) != FALSE;
 	}
 
 	void Shutdown()
@@ -269,7 +269,7 @@ public:
 		// resync 가 계속 오르면 기준이 못 잡히는 것이다.
 		printf_s("[pace] presented=%llu buffer=%ldms waits=%llu avgWait=%.1fms resync=%llu\n",
 			static_cast<unsigned long long>(m_presentedFrames),
-			::InterlockedCompareExchange(&m_jitterBufferMs, 0, 0),
+			::ReadAcquire(&m_jitterBufferMs),
 			static_cast<unsigned long long>(m_paceWaitCount),
 			m_paceWaitCount > 0 ? static_cast<double>(m_paceWaitTotalMs) / m_paceWaitCount : 0.0,
 			static_cast<unsigned long long>(m_paceResyncCount));
@@ -336,12 +336,13 @@ private:
 
 		m_streamingClient->SendFeedback(decodeDroppedTotal);
 	}
+
 	void ServiceReconnect(ULONGLONG now)
 	{
 		if (!m_streamingClient)
 			return;
 
-		if (::InterlockedCompareExchange(&m_reconnectPending, 0, 0) == FALSE)
+		if (::ReadAcquire(&m_reconnectPending) == FALSE)
 			return;
 
 		if (now < m_nextReconnectTick)
@@ -561,7 +562,7 @@ private:
 			return;
 
 		// 창이 닫히는 중이면 뷰어를 건드리지 않는다.
-		if (::InterlockedCompareExchange(&m_viewerAlive, FALSE, FALSE) == FALSE)
+		if (::ReadAcquire(&m_viewerAlive) == FALSE)
 			return;
 
 		if (!frame.sharedHandle)
@@ -575,13 +576,12 @@ private:
 
 	void PaceFramePresentation(uint64_t frameTimestamp)
 	{
-		const uint32_t bufferDepthMs = ::InterlockedCompareExchange(
-			const_cast<volatile LONG*>(&m_jitterBufferMs), 0, 0);
+		const uint32_t bufferDepthMs = ::ReadAcquire(&m_jitterBufferMs);
 
 		if (bufferDepthMs == 0)
 			return;   // 페이싱을 끄면 예전처럼 즉시 표시한다
 
-		const uint16_t fps = static_cast<uint16_t>(::InterlockedCompareExchange(&m_streamFpsAtomic, 0, 0));
+		const uint16_t fps = static_cast<uint16_t>(::ReadAcquire(&m_streamFpsAtomic));
 		const double frameIntervalMs = 1000.0 / fps;
 		const ULONGLONG now = ::GetTickCount64();
 
