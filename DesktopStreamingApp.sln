@@ -57,6 +57,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "StreamingServer", "Service\
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "StreamingClient", "Service\StreamingClient\StreamingClient.vcxproj", "{B5356112-B56D-40F3-9631-4E65B116F077}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "StreamingViewerUI", "Service\StreamingViewerUI\StreamingViewerUI.vcxproj", "{2F7B1D64-90AC-4C51-B3A8-6DE51C0F7A29}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -169,6 +171,14 @@ Global
 		{B5356112-B56D-40F3-9631-4E65B116F077}.Release|x64.Build.0 = Release|x64
 		{B5356112-B56D-40F3-9631-4E65B116F077}.Release|x86.ActiveCfg = Release|Win32
 		{B5356112-B56D-40F3-9631-4E65B116F077}.Release|x86.Build.0 = Release|Win32
+		{2F7B1D64-90AC-4C51-B3A8-6DE51C0F7A29}.Debug|x64.ActiveCfg = Debug|x64
+		{2F7B1D64-90AC-4C51-B3A8-6DE51C0F7A29}.Debug|x64.Build.0 = Debug|x64
+		{2F7B1D64-90AC-4C51-B3A8-6DE51C0F7A29}.Debug|x86.ActiveCfg = Debug|Win32
+		{2F7B1D64-90AC-4C51-B3A8-6DE51C0F7A29}.Debug|x86.Build.0 = Debug|Win32
+		{2F7B1D64-90AC-4C51-B3A8-6DE51C0F7A29}.Release|x64.ActiveCfg = Release|x64
+		{2F7B1D64-90AC-4C51-B3A8-6DE51C0F7A29}.Release|x64.Build.0 = Release|x64
+		{2F7B1D64-90AC-4C51-B3A8-6DE51C0F7A29}.Release|x86.ActiveCfg = Release|Win32
+		{2F7B1D64-90AC-4C51-B3A8-6DE51C0F7A29}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -188,6 +198,7 @@ Global
 		{0BA5D14C-AC14-449F-A44B-87A6B7550ABA} = {8E0511E9-9FED-451F-B064-30A4F9E79F68}
 		{899A9742-6149-41C8-9422-56686E6B9E3A} = {8E0511E9-9FED-451F-B064-30A4F9E79F68}
 		{B5356112-B56D-40F3-9631-4E65B116F077} = {8E0511E9-9FED-451F-B064-30A4F9E79F68}
+		{2F7B1D64-90AC-4C51-B3A8-6DE51C0F7A29} = {8E0511E9-9FED-451F-B064-30A4F9E79F68}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {F5A978F7-7031-4500-814E-EA2D4BF29B16}

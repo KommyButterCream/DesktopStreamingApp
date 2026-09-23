@@ -1,0 +1,47 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="소스 파일">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="헤더 파일">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Render Layer">
+      <UniqueIdentifier>{c58a2f31-7e40-4b6d-9a12-8d3f5b0c47ae}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Widget">
+      <UniqueIdentifier>{1e6d9b05-3af2-4c88-b7e1-25904cd6f83b}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="StreamingViewerUI.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="ServiceControlLayer.h">
+      <Filter>Render Layer</Filter>
+    </ClInclude>
+    <ClInclude Include="ServiceGlyphButton.h">
+      <Filter>Widget</Filter>
+    </ClInclude>
+    <ClInclude Include="ServiceMenuButton.h">
+      <Filter>Widget</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="StreamingViewerUI.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="ServiceControlLayer.cpp">
+      <Filter>Render Layer</Filter>
+    </ClCompile>
+    <ClCompile Include="ServiceGlyphButton.cpp">
+      <Filter>Widget</Filter>
+    </ClCompile>
+    <ClCompile Include="ServiceMenuButton.cpp">
+      <Filter>Widget</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>

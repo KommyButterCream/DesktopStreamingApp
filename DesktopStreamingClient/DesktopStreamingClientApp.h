@@ -14,6 +14,7 @@
 #include "../../../Module/D3D11ImageView/D3D11ImageView/D3D11ImageView.h"
 #include "../../../Module/NvCodec/NvDecode/D3D11NvDecoder.h"
 #include "../Service/StreamingClient/StreamingClient.h"
+#include "../Service/StreamingViewerUI/StreamingViewerUI.h"
 
 class DesktopStreamingClientApp
 {
@@ -107,6 +108,53 @@ public:
 		m_imageView->SetCloseHandler(ViewerCloseCallback, this);
 		::InterlockedExchange(&m_viewerAlive, TRUE);
 
+		// 뷰어 내장 UI 를 끈다.
+		//
+		// 툴바의 측정 / LUT / 픽셀 격자는 검사 이미지를 들여다보는 도구라
+		// 실시간 영상에는 쓸 일이 없고, 하단 상태바는 아래에 붙일 컨트롤
+		// 바와 자리가 겹친다. 둘 다 띄우면 UI 가 두 벌로 보인다.
+		m_imageView->SetToolbarVisible(false);
+		m_imageView->SetStatusBarVisible(false);
+
+		// 스트리밍 컨트롤 바. 뷰어에 외부 렌더 레이어로 얹힌다.
+		//
+		// 뷰어는 이 UI 가 무엇인지 모른다 — 재생이나 볼륨이라는 개념은
+		// 전부 StreamingViewerUI.dll 안에 있고, 뷰어는 그리기 자리와
+		// 마우스만 넘겨준다.
+		m_viewerUI = new StreamingViewerUI();
+		if (m_viewerUI)
+		{
+			m_viewerUI->SetCommandCallback(ViewerUICommandCallback, this);
+			m_viewerUI->SetVolumeCallback(ViewerUIVolumeCallback, this);
+
+			m_viewerUI->SetQualityCallback(ViewerUIQualityCallback, this);
+
+			if (!m_viewerUI->Attach(m_imageView))
+			{
+				printf_s("[DesktopStreamingClient] Failed to attach the viewer control bar.\n");
+				delete m_viewerUI;
+				m_viewerUI = nullptr;
+			}
+			else
+			{
+				// 화질 목록. 라벨은 호스트가 정하고, 고른 결과는 인덱스로만 온다.
+				// 아직 실제 화질 전환은 붙이지 않았다 — 서버에 그 요청이 없다.
+				static const StreamingQualityOption qualityOptions[] =
+				{
+					{ L"자동" },
+					{ L"원본" },
+					{ L"1080p" },
+					{ L"720p" },
+				};
+
+				m_viewerUI->SetQualityOptions(qualityOptions, _countof(qualityOptions));
+				m_viewerUI->SetSelectedQuality(0);
+
+				// 지연 눈금 상한. 이 값을 넘으면 바가 가득 찬 채로 멈춘다.
+				m_viewerUI->SetLatencyRange(200.0f);
+			}
+		}
+
 		// 디코드 워커와 유입 큐를 모두 디코더가 소유한다.
 		m_nvDecoder->SetFrameCallback(DecodedFrameCallback, this);
 		if (!m_nvDecoder->StartDecodeThread())
@@ -186,6 +234,9 @@ public:
 			// 수신 상태를 서버에 알린다. 서버의 비트레이트 조정이 이걸 본다.
 			ServiceFeedback(now);
 
+			// 컨트롤 바의 지연 표시.
+			ServiceViewerUI(now);
+
 			if (now >= m_nextStatsTick)
 			{
 				m_nextStatsTick = now + STATS_INTERVAL_MS;
@@ -222,6 +273,15 @@ public:
 		if (m_nvDecoder)
 		{
 			m_nvDecoder->StopDecodeThread();
+		}
+
+		// 컨트롤 바를 뷰어보다 먼저 뗀다. Detach 가 렌더 락 안에서
+		// 레이어를 빼므로, 반환한 뒤에는 렌더 스레드가 그것을 부르지 않는다.
+		if (m_viewerUI)
+		{
+			m_viewerUI->Detach();
+			delete m_viewerUI;
+			m_viewerUI = nullptr;
 		}
 
 		if (m_imageView)
@@ -285,6 +345,9 @@ private:
 
 	// 서버에 수신 상태를 알리는 주기. 서버의 비트레이트 조정이 이걸 본다.
 	static constexpr ULONGLONG FEEDBACK_INTERVAL_MS = 1'000;
+
+	// 지연 표시 갱신 주기. 더 자주 바꿔 봐야 숫자가 떨리기만 한다.
+	static constexpr ULONGLONG VIEWER_UI_INTERVAL_MS = 500;
 
 	// 지터 버퍼 기본 깊이. 한 프레임 남짓이다.
 	//
@@ -391,6 +454,110 @@ private:
 		if (self)
 		{
 			self->OnDecodedFrame(frame);
+		}
+	}
+
+	// 컨트롤 바 버튼이 눌렸다.
+	//
+	// 1차 검증 단계라 실제 재생 제어는 아직 붙이지 않았다. 지금은 눌린
+	// 사실을 찍고 버튼 모양만 바꾼다 — 레이어 등록 / 그리기 / 히트 테스트 /
+	// 이벤트 전달이 끝까지 이어지는지를 보는 것이 목적이다.
+	void OnViewerUICommand(StreamingViewerCommand command)
+	{
+		const char* name = "unknown";
+		switch (command)
+		{
+		case StreamingViewerCommand::Play:  name = "play"; break;
+		case StreamingViewerCommand::Pause: name = "pause"; break;
+		case StreamingViewerCommand::Stop:  name = "stop"; break;
+		default: break;
+		}
+
+		printf_s("[viewer-ui] command : %s\n", name);
+
+		if (!m_viewerUI)
+			return;
+
+		// 상태를 바꾸는 것은 호스트다. 버튼이 스스로 바꾸지 않는 이유는,
+		// 눌렀다고 재생이 실제로 시작된다는 보장이 없기 때문이다.
+		switch (command)
+		{
+		case StreamingViewerCommand::Play:
+			m_viewerUI->SetPlaybackState(StreamingPlaybackState::Playing);
+			break;
+
+		case StreamingViewerCommand::Pause:
+			m_viewerUI->SetPlaybackState(StreamingPlaybackState::Paused);
+			break;
+
+		case StreamingViewerCommand::Stop:
+			m_viewerUI->SetPlaybackState(StreamingPlaybackState::Stopped);
+			break;
+
+		default:
+			break;
+		}
+	}
+
+	void OnViewerUIVolume(float volume)
+	{
+		printf_s("[viewer-ui] volume  : %.2f\n", volume);
+	}
+
+	void OnViewerUIQuality(uint32_t index)
+	{
+		printf_s("[viewer-ui] quality : %u\n", index);
+	}
+
+	// 컨트롤 바의 지연 표시를 갱신한다.
+	//
+	// 끝에서 끝까지의 지연은 서버와 시계를 맞춰야 알 수 있고 지금 그런
+	// 수단이 없다. 대신 클라이언트가 실제로 아는 것을 보여준다 —
+	// 지터 버퍼 깊이와 최근 평균 대기 시간의 합이다. 즉 "디코딩이 끝난
+	// 프레임이 화면에 나오기까지 이쪽에서 붙든 시간" 이다.
+	void ServiceViewerUI(ULONGLONG now)
+	{
+		if (!m_viewerUI)
+			return;
+
+		if (now < m_nextViewerUITick)
+			return;
+
+		m_nextViewerUITick = now + VIEWER_UI_INTERVAL_MS;
+
+		const float bufferMs = static_cast<float>(::ReadAcquire(&m_jitterBufferMs));
+		const float avgWaitMs = (m_paceWaitCount > 0)
+			? static_cast<float>(m_paceWaitTotalMs) / static_cast<float>(m_paceWaitCount)
+			: 0.0f;
+
+		m_viewerUI->SetLatency(bufferMs + avgWaitMs);
+	}
+
+	// 컨트롤 바에서 버튼을 눌렀다. 창 메시지 스레드에서 불린다.
+	static void ViewerUICommandCallback(StreamingViewerCommand command, void* userData)
+	{
+		DesktopStreamingClientApp* self = static_cast<DesktopStreamingClientApp*>(userData);
+		if (self)
+		{
+			self->OnViewerUICommand(command);
+		}
+	}
+
+	static void ViewerUIQualityCallback(uint32_t index, void* userData)
+	{
+		DesktopStreamingClientApp* self = static_cast<DesktopStreamingClientApp*>(userData);
+		if (self)
+		{
+			self->OnViewerUIQuality(index);
+		}
+	}
+
+	static void ViewerUIVolumeCallback(float volume, void* userData)
+	{
+		DesktopStreamingClientApp* self = static_cast<DesktopStreamingClientApp*>(userData);
+		if (self)
+		{
+			self->OnViewerUIVolume(volume);
 		}
 	}
 
@@ -639,6 +806,7 @@ private:
 	ULONGLONG m_nextStatsTick = 0;
 	ULONGLONG m_nextReconnectTick = 0;
 	ULONGLONG m_nextFeedbackTick = 0;
+	ULONGLONG m_nextViewerUITick = 0;
 
 	// 지터 버퍼. 디코드 스레드가 읽고 앱 스레드가 바꿀 수 있어 원자적이다.
 	volatile LONG m_jitterBufferMs = DEFAULT_JITTER_BUFFER_MS;
@@ -665,5 +833,8 @@ private:
 	D3D11RenderEngine* m_D3D11Engine = nullptr;
 	D3D11NvDecoder* m_nvDecoder = nullptr;
 	D3D11ImageView* m_imageView = nullptr;
+
+	// 뷰어 위에 얹는 스트리밍 컨트롤 바. 뷰어보다 먼저 정리한다.
+	StreamingViewerUI* m_viewerUI = nullptr;
 	StreamingClient* m_streamingClient = nullptr;
 };
