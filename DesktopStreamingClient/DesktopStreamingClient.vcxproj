@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -130,9 +130,6 @@
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..ServiceStreamingClientHostDesktopStreamingClientApp.h" />
-  </ItemGroup>
-  <ItemGroup>
     <ProjectReference Include="..\..\..\Module\Core\Core\Core.vcxproj">
       <Project>{e3bd70c4-fc37-4703-9a54-152fd00bdea2}</Project>
     </ProjectReference>
@@ -150,6 +147,9 @@
     </ProjectReference>
     <ProjectReference Include="..\Service\StreamingViewerUI\StreamingViewerUI.vcxproj">
       <Project>{2f7b1d64-90ac-4c51-b3a8-6de51c0f7a29}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\Service\StreamingClientHost\StreamingClientHost.vcxproj">
+      <Project>{6640cbf0-8707-4078-b8fa-fb69f3673c5d}</Project>
     </ProjectReference>
     <ProjectReference Include="..\Service\StreamingClient\StreamingClient.vcxproj">
       <Project>{b5356112-b56d-40f3-9631-4e65b116f077}</Project>
