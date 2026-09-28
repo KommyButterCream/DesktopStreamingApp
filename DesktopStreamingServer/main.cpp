@@ -2,7 +2,7 @@
 
 #include "../../../Module/Core/DirectX/DxDebugUtils.h"
 
-#include "DesktopStreamingServerApp.h"
+#include "../Service/StreamingServerHost/DesktopStreamingServerApp.h"
 
 static DesktopStreamingServerApp* g_appInstance = nullptr;
 

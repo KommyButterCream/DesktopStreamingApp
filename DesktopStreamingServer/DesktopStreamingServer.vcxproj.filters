@@ -20,7 +20,7 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="DesktopStreamingServerApp.h">
+    <ClInclude Include="..ServiceStreamingServerHostDesktopStreamingServerApp.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
   </ItemGroup>
