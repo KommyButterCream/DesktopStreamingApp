@@ -26,9 +26,6 @@
     <ClInclude Include="ServiceGlyphButton.h">
       <Filter>Widget</Filter>
     </ClInclude>
-    <ClInclude Include="ServiceMenuButton.h">
-      <Filter>Widget</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="StreamingViewerUI.cpp">
@@ -38,9 +35,6 @@
       <Filter>Render Layer</Filter>
     </ClCompile>
     <ClCompile Include="ServiceGlyphButton.cpp">
-      <Filter>Widget</Filter>
-    </ClCompile>
-    <ClCompile Include="ServiceMenuButton.cpp">
       <Filter>Widget</Filter>
     </ClCompile>
   </ItemGroup>

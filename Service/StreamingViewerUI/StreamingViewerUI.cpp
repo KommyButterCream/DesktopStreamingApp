@@ -79,17 +79,14 @@ void StreamingViewerUI::ApplyPendingSettings()
 	m_layer->SetFrameRequestCallback(&StreamingViewerUI::RequestFrame, this);
 
 	m_layer->SetCommandCallback(m_commandCallback, m_commandUserData);
-	m_layer->SetVolumeCallback(m_volumeCallback, m_volumeUserData);
-	m_layer->SetQualityCallback(m_qualityCallback, m_qualityUserData);
 
 	m_layer->SetAutoHideDelay(m_autoHideDelay);
 	m_layer->SetAutoHide(m_autoHide);
 
 	m_layer->SetPlaybackState(m_playbackState);
-	m_layer->SetVolume(m_volume);
 	m_layer->SetLatencyRange(m_latencyRange);
 	m_layer->SetLatency(m_latency);
-	m_layer->SetSelectedQuality(m_selectedQuality);
+	m_layer->SetQualityInfo(m_qualityInfo);
 	m_layer->SetVisible(m_visible);
 }
 
@@ -113,28 +110,6 @@ void StreamingViewerUI::SetCommandCallback(CommandCallback callback, void* userD
 	}
 }
 
-void StreamingViewerUI::SetVolumeCallback(VolumeCallback callback, void* userData)
-{
-	m_volumeCallback = callback;
-	m_volumeUserData = userData;
-
-	if (m_layer)
-	{
-		m_layer->SetVolumeCallback(callback, userData);
-	}
-}
-
-void StreamingViewerUI::SetQualityCallback(QualityCallback callback, void* userData)
-{
-	m_qualityCallback = callback;
-	m_qualityUserData = userData;
-
-	if (m_layer)
-	{
-		m_layer->SetQualityCallback(callback, userData);
-	}
-}
-
 void StreamingViewerUI::SetPlaybackState(StreamingPlaybackState state)
 {
 	m_playbackState = state;
@@ -153,26 +128,6 @@ void StreamingViewerUI::SetPlaybackState(StreamingPlaybackState state)
 StreamingPlaybackState StreamingViewerUI::GetPlaybackState() const
 {
 	return m_playbackState;
-}
-
-void StreamingViewerUI::SetVolume(float volume)
-{
-	m_volume = volume;
-
-	if (m_layer)
-	{
-		m_layer->SetVolume(volume);
-	}
-
-	if (m_viewer)
-	{
-		m_viewer->InvalidateFrame();
-	}
-}
-
-float StreamingViewerUI::GetVolume() const
-{
-	return m_layer ? m_layer->GetVolume() : m_volume;
 }
 
 void StreamingViewerUI::SetLatency(float milliseconds)
@@ -204,37 +159,17 @@ float StreamingViewerUI::GetLatency() const
 	return m_latency;
 }
 
-void StreamingViewerUI::SetQualityOptions(const StreamingQualityOption* options, uint32_t count)
+void StreamingViewerUI::SetQualityInfo(const StreamingQualityInfo& info)
 {
-	if (m_layer)
-	{
-		m_layer->SetQualityOptions(options, count);
-	}
-
-	if (m_viewer)
-	{
-		m_viewer->InvalidateFrame();
-	}
-}
-
-void StreamingViewerUI::SetSelectedQuality(uint32_t index)
-{
-	m_selectedQuality = index;
+	m_qualityInfo = info;
 
 	if (m_layer)
 	{
-		m_layer->SetSelectedQuality(index);
+		m_layer->SetQualityInfo(info);
 	}
 
-	if (m_viewer)
-	{
-		m_viewer->InvalidateFrame();
-	}
-}
-
-uint32_t StreamingViewerUI::GetSelectedQuality() const
-{
-	return m_layer ? m_layer->GetSelectedQuality() : m_selectedQuality;
+	// 지연과 같은 이유로 프레임을 강제하지 않는다. 해상도가 바뀌면
+	// 새 프레임이 뒤따라 오므로 그때 함께 반영된다.
 }
 
 void StreamingViewerUI::SetAutoHide(bool enabled)

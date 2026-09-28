@@ -4,7 +4,6 @@
 #include "../../../../Module/D3D11EngineInterface/IRenderEngine.h"
 #include "../../../../Module/D3D11UIFramework/D3D11UIFramework/Slider/UISlider.h"
 #include "../../../../Module/D3D11UIFramework/D3D11UIFramework/Label/UILabel.h"
-#include "../../../../Module/D3D11UIFramework/D3D11UIFramework/Panel/UIContextMenuPanel.h"
 #include "../../../../Module/Core/ShapeType/Point2f.h"
 #include "../../../../Module/Core/DirectX/DxSafeRelease.h"
 
@@ -24,8 +23,8 @@ namespace
 	constexpr float kButtonSize = 28.0f;
 	constexpr float kGap = 8.0f;
 
-	constexpr float kVolumeWidth = 96.0f;
-	constexpr float kQualityWidth = 76.0f;
+	// "1440p60 · 18.4 Mbps" 가 잘리지 않을 만큼.
+	constexpr float kQualityWidth = 150.0f;
 	constexpr float kLatencyLabelWidth = 62.0f;
 	constexpr float kLatencyBarMinWidth = 60.0f;
 
@@ -36,31 +35,20 @@ namespace
 	// 이보다 좁으면 오른쪽 것부터 접는다.
 	constexpr float kMinBarWidth = 240.0f;
 
-	constexpr float kMenuWidth = 120.0f;
-	constexpr float kMenuItemHeight = 26.0f;
-
-	// 메뉴 안쪽 여백과 항목 간격. 패널의 UpdateVerticalLayout 과
-	// 높이 계산이 둘 다 이 값을 쓴다. 한 곳에 모아 둔다.
-	constexpr float kMenuPadding = 4.0f;
-	constexpr float kMenuSpacing = 0.0f;
-
 	// 페이드가 완전히 열리고 닫히는 데 걸리는 시간.
 	constexpr float kFadeSeconds = 0.18f;
-
-	// 화질 버튼이 쓰는 명령 값. StreamingViewerCommand 와 겹치지 않게
-	// 큰 값으로 띄운다 — 두 콜백이 같은 함수 시그니처를 쓰기 때문이다.
-	constexpr uint32_t kQualityButtonCommandId = 1000;
 
 	D2D1_COLOR_F Rgba(float r, float g, float b, float a)
 	{
 		return D2D1::ColorF(r, g, b, a);
 	}
 
-	// 알파를 곱한 사본. 페이드 중에 자식 색을 통째로 바꾸는 대신
-	// 레이어 불투명도로 처리하므로, 이 함수는 바 배경에만 쓴다.
-	D2D1_COLOR_F WithAlpha(const D2D1_COLOR_F& color, float alpha)
+	bool SameQualityInfo(const StreamingQualityInfo& lhs, const StreamingQualityInfo& rhs)
 	{
-		return D2D1::ColorF(color.r, color.g, color.b, color.a * alpha);
+		return lhs.width == rhs.width
+			&& lhs.height == rhs.height
+			&& lhs.fps == rhs.fps
+			&& lhs.bitrateMbps == rhs.bitrateMbps;
 	}
 }
 
@@ -78,7 +66,7 @@ bool ServiceControlLayer::Initialize(IRenderContext* context)
 
 	m_context = context;
 
-	// 텍스트를 쓰는 요소(지연 라벨, 화질 메뉴)가 폰트 매니저를 요구한다.
+	// 텍스트를 쓰는 요소(지연 라벨, 화질 라벨)가 폰트 매니저를 요구한다.
 	// 뷰어가 자기 엔진을 만들 때 initFontManager 를 켜므로 여기 있다.
 	if (IRenderEngine* engine = m_context->GetEngine())
 	{
@@ -86,12 +74,6 @@ bool ServiceControlLayer::Initialize(IRenderContext* context)
 	}
 
 	if (!CreateChildren(context))
-	{
-		Shutdown();
-		return false;
-	}
-
-	if (!CreateQualityMenu(context))
 	{
 		Shutdown();
 		return false;
@@ -115,7 +97,7 @@ bool ServiceControlLayer::Initialize(IRenderContext* context)
 
 	ApplyPlaybackState();
 	ApplyLatency();
-	ApplyQualityLabel();
+	ApplyQualityInfo();
 
 	return true;
 }
@@ -129,11 +111,7 @@ void ServiceControlLayer::Shutdown()
 	}
 
 	// 자식이 들고 있는 D2D 리소스가 컨텍스트보다 오래 살면 안 된다.
-	m_qualityItems.clear();
-	m_qualityMenu.reset();
-
-	m_volumeSlider.reset();
-	m_qualityButton.reset();
+	m_qualityLabel.reset();
 	m_latencyLabel.reset();
 	m_latencyBar.reset();
 	m_stopButton.reset();
@@ -151,11 +129,8 @@ bool ServiceControlLayer::Prepare()
 	if (m_latencyLabel)
 		m_latencyLabel->Prepare();
 
-	if (m_qualityButton)
-		m_qualityButton->Prepare();
-
-	if (m_qualityMenu && m_qualityMenu->IsVisible())
-		m_qualityMenu->Prepare();
+	if (m_qualityLabel)
+		m_qualityLabel->Prepare();
 
 	return true;
 }
@@ -176,17 +151,7 @@ bool ServiceControlLayer::Render()
 	// 시간 진행. 뷰어가 계산해 둔 프레임 간격을 그대로 쓴다.
 	const float deltaSeconds = m_context->GetDeltaTime();
 
-	if (m_qualityMenu && m_qualityMenu->IsVisible())
-	{
-		// 메뉴가 열려 있는 동안에는 숨지 않는다. 고르는 도중에 사라지면
-		// 그보다 나쁜 동작이 없다.
-		m_idleSeconds = 0.0f;
-		m_qualityMenu->Update(deltaSeconds);
-	}
-	else
-	{
-		m_idleSeconds += deltaSeconds;
-	}
+	m_idleSeconds += deltaSeconds;
 
 	if (AdvanceFade(deltaSeconds))
 	{
@@ -204,18 +169,8 @@ bool ServiceControlLayer::Render()
 	const bool needsOpacityLayer = (m_alpha < 1.0f);
 	if (needsOpacityLayer)
 	{
-		// 바와 (열려 있다면) 메뉴를 함께 덮는 범위로 한정한다.
-		D2D1_RECT_F bounds = D2D1::RectF(
+		const D2D1_RECT_F bounds = D2D1::RectF(
 			m_barRect.left, m_barRect.top, m_barRect.right, m_barRect.bottom);
-
-		if (m_qualityMenu && m_qualityMenu->IsVisible())
-		{
-			const auto& menu = m_qualityMenu->GetLayout();
-			bounds.left = (std::min)(bounds.left, menu.left);
-			bounds.top = (std::min)(bounds.top, menu.top);
-			bounds.right = (std::max)(bounds.right, menu.right);
-			bounds.bottom = (std::max)(bounds.bottom, menu.bottom);
-		}
 
 		d2dContext->PushLayer(
 			D2D1::LayerParameters1(
@@ -233,14 +188,7 @@ bool ServiceControlLayer::Render()
 	if (m_stopButton)      m_stopButton->Render();
 	if (m_latencyBar)      m_latencyBar->Render();
 	if (m_latencyLabel)    m_latencyLabel->Render();
-	if (m_qualityButton)   m_qualityButton->Render();
-	if (m_volumeSlider)    m_volumeSlider->Render();
-
-	// 팝업은 바 위로 삐져나오므로 마지막에 그린다.
-	if (m_qualityMenu && m_qualityMenu->IsVisible())
-	{
-		m_qualityMenu->Render();
-	}
+	if (m_qualityLabel)    m_qualityLabel->Render();
 
 	if (needsOpacityLayer)
 	{
@@ -255,9 +203,6 @@ bool ServiceControlLayer::HitTest(float x, float y) const
 	if (!m_visible || m_alpha <= 0.0f)
 		return false;
 
-	if (m_qualityMenu && m_qualityMenu->IsVisible() && m_qualityMenu->HitTest(x, y))
-		return true;
-
 	return (x >= m_barRect.left) && (x <= m_barRect.right)
 		&& (y >= m_barRect.top) && (y <= m_barRect.bottom);
 }
@@ -267,15 +212,12 @@ bool ServiceControlLayer::OnMouseEvent(UIMouseEventType type, float x, float y)
 	if (!m_visible)
 		return false;
 
-	// 창을 벗어났다. 모든 자식의 hover / 드래그를 푼다. 바 밖이라고
-	// 건너뛰면 하이라이트가 고착된다.
+	// 창을 벗어났다. 모든 자식의 hover 를 푼다. 바 밖이라고 건너뛰면
+	// 하이라이트가 고착된다.
 	if (type == UIMouseEventType::Leave)
 	{
 		if (m_playPauseButton) m_playPauseButton->OnMouseEvent(type, x, y);
 		if (m_stopButton)      m_stopButton->OnMouseEvent(type, x, y);
-		if (m_qualityButton)   m_qualityButton->OnMouseEvent(type, x, y);
-		if (m_volumeSlider)    m_volumeSlider->OnMouseEvent(type, x, y);
-		if (m_qualityMenu)     m_qualityMenu->OnMouseEvent(type, x, y);
 		return false;
 	}
 
@@ -291,37 +233,6 @@ bool ServiceControlLayer::OnMouseEvent(UIMouseEventType type, float x, float y)
 	if (m_alpha <= 0.0f)
 		return false;
 
-	// 열린 메뉴가 최우선이다. 바깥을 누르면 닫고 그 클릭은 삼킨다 —
-	// 메뉴를 닫는 클릭이 뒤의 영상까지 건드리면 안 된다.
-	if (m_qualityMenu && m_qualityMenu->IsVisible())
-	{
-		if (m_qualityMenu->OnMouseEvent(type, x, y))
-		{
-			NotifyUserActivity();
-			RequestFrame();
-			return true;
-		}
-
-		if (type == UIMouseEventType::LButtonDown && !m_qualityMenu->HitTest(x, y))
-		{
-			CloseQualityMenu();
-			RequestFrame();
-			return true;
-		}
-	}
-
-	// 끌고 있는 요소가 있으면 좌표가 밖으로 나가도 그쪽이 먼저 받는다.
-	// 슬라이더를 잡고 바 밖으로 끌어도 값이 따라와야 한다.
-	if (m_volumeSlider && m_volumeSlider->IsDragging())
-	{
-		if (m_volumeSlider->OnMouseEvent(type, x, y))
-		{
-			NotifyUserActivity();
-			RequestFrame();
-			return true;
-		}
-	}
-
 	const bool insideBar = (x >= m_barRect.left) && (x <= m_barRect.right)
 		&& (y >= m_barRect.top) && (y <= m_barRect.bottom);
 
@@ -331,18 +242,19 @@ bool ServiceControlLayer::OnMouseEvent(UIMouseEventType type, float x, float y)
 		// 여기서 소비하면 영상 위 팬/줌이 죽는다.
 		if (m_playPauseButton) m_playPauseButton->OnMouseEvent(UIMouseEventType::Move, -1.0f, -1.0f);
 		if (m_stopButton)      m_stopButton->OnMouseEvent(UIMouseEventType::Move, -1.0f, -1.0f);
-		if (m_qualityButton)   m_qualityButton->OnMouseEvent(UIMouseEventType::Move, -1.0f, -1.0f);
-		if (m_volumeSlider)    m_volumeSlider->OnMouseEvent(UIMouseEventType::Move, -1.0f, -1.0f);
 		return false;
 	}
 
 	NotifyUserActivity();
 
-	bool consumed = false;
-	if (m_playPauseButton && m_playPauseButton->OnMouseEvent(type, x, y)) consumed = true;
-	else if (m_stopButton && m_stopButton->OnMouseEvent(type, x, y))      consumed = true;
-	else if (m_qualityButton && m_qualityButton->OnMouseEvent(type, x, y)) consumed = true;
-	else if (m_volumeSlider && m_volumeSlider->OnMouseEvent(type, x, y))  consumed = true;
+	if (m_playPauseButton && m_playPauseButton->OnMouseEvent(type, x, y))
+	{
+		// 소비됨
+	}
+	else if (m_stopButton)
+	{
+		m_stopButton->OnMouseEvent(type, x, y);
+	}
 
 	RequestFrame();
 
@@ -376,7 +288,6 @@ void ServiceControlLayer::OnResize(uint32_t width, uint32_t height)
 	m_viewWidth = static_cast<float>(width);
 	m_viewHeight = static_cast<float>(height);
 
-	CloseQualityMenu();
 	UpdateLayout();
 }
 
@@ -388,9 +299,7 @@ void ServiceControlLayer::OnDeviceLost()
 	if (m_stopButton)      m_stopButton->DiscardDeviceResources();
 	if (m_latencyBar)      m_latencyBar->DiscardDeviceResources();
 	if (m_latencyLabel)    m_latencyLabel->DiscardDeviceResources();
-	if (m_qualityButton)   m_qualityButton->DiscardDeviceResources();
-	if (m_volumeSlider)    m_volumeSlider->DiscardDeviceResources();
-	if (m_qualityMenu)     m_qualityMenu->DiscardDeviceResources();
+	if (m_qualityLabel)    m_qualityLabel->DiscardDeviceResources();
 }
 
 void ServiceControlLayer::OnDeviceRestored()
@@ -404,9 +313,7 @@ void ServiceControlLayer::OnDeviceRestored()
 	if (m_stopButton)      m_stopButton->RestoreDeviceResources(m_context);
 	if (m_latencyBar)      m_latencyBar->RestoreDeviceResources(m_context);
 	if (m_latencyLabel)    m_latencyLabel->RestoreDeviceResources(m_context);
-	if (m_qualityButton)   m_qualityButton->RestoreDeviceResources(m_context);
-	if (m_volumeSlider)    m_volumeSlider->RestoreDeviceResources(m_context);
-	if (m_qualityMenu)     m_qualityMenu->RestoreDeviceResources(m_context);
+	if (m_qualityLabel)    m_qualityLabel->RestoreDeviceResources(m_context);
 
 	UpdateLayout();
 }
@@ -423,18 +330,6 @@ void ServiceControlLayer::SetCommandCallback(StreamingViewerUI::CommandCallback 
 	m_commandUserData = userData;
 }
 
-void ServiceControlLayer::SetVolumeCallback(StreamingViewerUI::VolumeCallback callback, void* userData)
-{
-	m_volumeCallback = callback;
-	m_volumeUserData = userData;
-}
-
-void ServiceControlLayer::SetQualityCallback(StreamingViewerUI::QualityCallback callback, void* userData)
-{
-	m_qualityCallback = callback;
-	m_qualityUserData = userData;
-}
-
 void ServiceControlLayer::SetPlaybackState(StreamingPlaybackState state)
 {
 	if (m_playbackState == state)
@@ -449,22 +344,10 @@ StreamingPlaybackState ServiceControlLayer::GetPlaybackState() const
 	return m_playbackState;
 }
 
-void ServiceControlLayer::SetVolume(float volume)
-{
-	if (m_volumeSlider)
-	{
-		m_volumeSlider->SetValue(volume);
-	}
-}
-
-float ServiceControlLayer::GetVolume() const
-{
-	return m_volumeSlider ? m_volumeSlider->GetValue() : 0.0f;
-}
-
 void ServiceControlLayer::SetLatency(float milliseconds)
 {
-	m_latency = (milliseconds > 0.0f) ? milliseconds : 0.0f;
+	// 음수는 그대로 둔다. "모른다" 는 뜻이라 0 으로 접으면 안 된다.
+	m_latency = milliseconds;
 	ApplyLatency();
 }
 
@@ -488,53 +371,15 @@ float ServiceControlLayer::GetLatency() const
 	return m_latency;
 }
 
-void ServiceControlLayer::SetQualityOptions(const StreamingQualityOption* options, uint32_t count)
+void ServiceControlLayer::SetQualityInfo(const StreamingQualityInfo& info)
 {
-	// 라벨을 복사한다. 호출자가 리터럴을 넘기든 임시 버퍼를 넘기든
-	// 이쪽 수명과 얽히지 않게 한다.
-	m_qualityLabels.clear();
-	for (uint32_t index = 0; index < count; ++index)
-	{
-		const wchar_t* label = options ? options[index].label : nullptr;
-		m_qualityLabels.emplace_back(label ? label : L"");
-	}
-
-	if (m_selectedQuality >= m_qualityLabels.size())
-	{
-		m_selectedQuality = 0;
-	}
-
-	if (m_context)
-	{
-		CloseQualityMenu();
-		CreateQualityMenu(m_context);
-		UpdateLayout();
-	}
-
-	ApplyQualityLabel();
-}
-
-void ServiceControlLayer::SetSelectedQuality(uint32_t index)
-{
-	if (index >= m_qualityLabels.size())
+	// 호스트가 통계 주기마다 불러도 되도록, 바뀌지 않았으면 텍스트를
+	// 다시 만들지 않는다. SetText 는 DWrite 레이아웃을 새로 잡는다.
+	if (SameQualityInfo(m_qualityInfo, info))
 		return;
 
-	m_selectedQuality = index;
-
-	for (size_t itemIndex = 0; itemIndex < m_qualityItems.size(); ++itemIndex)
-	{
-		if (m_qualityItems[itemIndex])
-		{
-			m_qualityItems[itemIndex]->SetChecked(itemIndex == m_selectedQuality);
-		}
-	}
-
-	ApplyQualityLabel();
-}
-
-uint32_t ServiceControlLayer::GetSelectedQuality() const
-{
-	return m_selectedQuality;
+	m_qualityInfo = info;
+	ApplyQualityInfo();
 }
 
 void ServiceControlLayer::SetAutoHide(bool enabled)
@@ -617,119 +462,21 @@ bool ServiceControlLayer::CreateChildren(IRenderContext* context)
 	if (!m_latencyLabel->Initialize(context))
 		return false;
 
-	// 화질 버튼. 항목이 하나뿐이거나 없으면 레이아웃에서 숨긴다.
+	// 화질은 바의 오른쪽 끝에 붙으므로 오른쪽 정렬이다. 왼쪽 정렬로
+	// 두면 값의 자릿수가 바뀔 때마다 끝이 들쭉날쭉해진다.
 	UITextStyle qualityTextStyle = textStyle;
-	qualityTextStyle.hAlign = DWRITE_TEXT_ALIGNMENT_CENTER;
+	qualityTextStyle.hAlign = DWRITE_TEXT_ALIGNMENT_TRAILING;
+	qualityTextStyle.normal.fill = Rgba(0.72f, 0.76f, 0.82f, 1.0f);
+	qualityTextStyle.hover.fill = qualityTextStyle.normal.fill;
+	qualityTextStyle.pressed.fill = qualityTextStyle.normal.fill;
 
-	m_qualityButton = std::make_unique<ServiceMenuButton>();
-	m_qualityButton->SetFontManager(m_fontManager);
-	m_qualityButton->SetStyle(buttonStyle);
-	m_qualityButton->SetTextStyle(qualityTextStyle);
-	m_qualityButton->SetCheckable(false);
-	m_qualityButton->SetHasSubMenu(false);
-	m_qualityButton->SetIconAreaWidth(0.0f);
-	m_qualityButton->SetExtraAreaWidth(0.0f);
-	m_qualityButton->SetCommandId(kQualityButtonCommandId);
-	m_qualityButton->SetClickCallback(&ServiceControlLayer::OnQualityButtonClicked, this);
-	if (!m_qualityButton->Initialize(context))
+	m_qualityLabel = std::make_unique<UILabel>();
+	m_qualityLabel->SetFontManager(m_fontManager);
+	m_qualityLabel->SetTextStyle(qualityTextStyle);
+	m_qualityLabel->SetText(L"--");
+	if (!m_qualityLabel->Initialize(context))
 		return false;
 
-	m_volumeSlider = std::make_unique<UISlider>();
-	m_volumeSlider->SetRange(0.0f, 1.0f);
-	m_volumeSlider->SetValue(0.7f);
-	m_volumeSlider->SetTrackThickness(4.0f);
-	m_volumeSlider->SetThumbRadius(6.0f);
-	m_volumeSlider->SetTrackColor(Rgba(1.0f, 1.0f, 1.0f, 0.22f));
-	m_volumeSlider->SetFillColor(Rgba(0.42f, 0.70f, 1.0f, 1.0f));
-	m_volumeSlider->SetThumbColor(Rgba(1.0f, 1.0f, 1.0f, 1.0f));
-	m_volumeSlider->SetValueChangedCallback(&ServiceControlLayer::OnVolumeChanged, this);
-	if (!m_volumeSlider->Initialize(context))
-		return false;
-
-	return true;
-}
-
-bool ServiceControlLayer::CreateQualityMenu(IRenderContext* context)
-{
-	// 목록이 바뀔 때마다 통째로 다시 만든다. 항목 수가 한 자릿수라
-	// 재사용할 이유가 없고, 부분 갱신은 체크 상태를 놓치기 쉽다.
-	m_qualityItems.clear();
-	m_qualityMenu.reset();
-
-	if (m_qualityLabels.empty())
-		return true;
-
-	UIStyle menuStyle = {};
-	menuStyle.borderThickness = 1.0f;
-	menuStyle.normal.fill = Rgba(0.13f, 0.14f, 0.16f, 0.97f);
-	menuStyle.normal.border = Rgba(1.0f, 1.0f, 1.0f, 0.14f);
-	menuStyle.hover.fill = menuStyle.normal.fill;
-	menuStyle.pressed.fill = menuStyle.normal.fill;
-	menuStyle.disabled.fill = menuStyle.normal.fill;
-
-	m_qualityMenu = std::make_unique<UIContextMenuPanel>();
-	m_qualityMenu->SetStyle(menuStyle);
-	m_qualityMenu->SetMenuWidth(kMenuWidth);
-	m_qualityMenu->SetPadding(kMenuPadding);
-	m_qualityMenu->SetSpacing(kMenuSpacing);
-
-	// 기본값은 None 이라 패널이 자식 위치를 손대지 않는다.
-	// 그러면 항목이 제 자리 값(0,0)을 그대로 쓰며 창 좌상단에
-	// 겹쳐 그려진다. 메뉴는 세로 목록이다.
-	m_qualityMenu->SetLayoutType(UILayoutType::Vertical);
-	m_qualityMenu->SetRounded(true);
-	m_qualityMenu->SetCornerRadius(4.0f);
-
-	if (!m_qualityMenu->Initialize(context))
-	{
-		m_qualityMenu.reset();
-		return false;
-	}
-
-	UIStyle itemStyle = {};
-	itemStyle.borderThickness = 0.0f;
-	itemStyle.normal.fill = Rgba(0.0f, 0.0f, 0.0f, 0.0f);
-	itemStyle.hover.fill = Rgba(1.0f, 1.0f, 1.0f, 0.14f);
-	itemStyle.pressed.fill = Rgba(1.0f, 1.0f, 1.0f, 0.22f);
-	itemStyle.disabled.fill = Rgba(0.0f, 0.0f, 0.0f, 0.0f);
-
-	UITextStyle itemTextStyle = {};
-	itemTextStyle.fontSize = 12.0f;
-	itemTextStyle.normal.fill = Rgba(0.88f, 0.90f, 0.93f, 1.0f);
-	itemTextStyle.hover.fill = Rgba(1.0f, 1.0f, 1.0f, 1.0f);
-	itemTextStyle.pressed.fill = itemTextStyle.hover.fill;
-	itemTextStyle.disabled.fill = Rgba(0.55f, 0.57f, 0.60f, 1.0f);
-	itemTextStyle.hAlign = DWRITE_TEXT_ALIGNMENT_LEADING;
-	itemTextStyle.vAlign = DWRITE_PARAGRAPH_ALIGNMENT_CENTER;
-
-	for (size_t index = 0; index < m_qualityLabels.size(); ++index)
-	{
-		auto item = std::make_shared<ServiceMenuButton>();
-		item->SetFontManager(m_fontManager);
-		item->SetStyle(itemStyle);
-		item->SetTextStyle(itemTextStyle);
-		item->SetText(m_qualityLabels[index].c_str());
-		item->SetCheckable(true);
-		item->SetChecked(index == m_selectedQuality);
-		item->SetCommandId(static_cast<uint32_t>(index));
-		item->SetClickCallback(&ServiceControlLayer::OnQualityItemClicked, this);
-
-		Rect2f itemRect = {};
-		itemRect.left = 0.0f;
-		itemRect.top = 0.0f;
-		// 가로 폭은 패널이 다시 잡는다. 높이만 여기서 정한다.
-		itemRect.right = kMenuWidth - kMenuPadding * 2.0f;
-		itemRect.bottom = kMenuItemHeight;
-		item->SetLayout(itemRect);
-
-		if (!item->Initialize(context))
-			return false;
-
-		m_qualityMenu->AddChild(item);
-		m_qualityItems.push_back(item);
-	}
-
-	m_qualityMenu->Hide();
 	return true;
 }
 
@@ -803,25 +550,13 @@ void ServiceControlLayer::UpdateLayout()
 		cursorLeft += kButtonSize + kGap;
 	}
 
-	// --- 오른쪽부터: 볼륨, 화질 ---
+	// --- 오른쪽 끝: 화질 표시 ---
 	float cursorRight = m_barRect.right - kBarPadding;
 
-	if (m_volumeSlider)
+	if (m_qualityLabel)
 	{
-		m_volumeSlider->SetLayout(placeRow(cursorRight - kVolumeWidth, kVolumeWidth));
-		m_volumeSlider->SetVisible(true);
-		cursorRight -= kVolumeWidth + kGap;
-	}
-
-	const bool hasQualityMenu = (m_qualityLabels.size() > 1);
-	if (m_qualityButton)
-	{
-		m_qualityButton->SetVisible(hasQualityMenu);
-		if (hasQualityMenu)
-		{
-			m_qualityButton->SetLayout(placeRow(cursorRight - kQualityWidth, kQualityWidth));
-			cursorRight -= kQualityWidth + kGap;
-		}
+		m_qualityLabel->SetLayout(placeRow(cursorRight - kQualityWidth, kQualityWidth));
+		cursorRight -= kQualityWidth + kGap;
 	}
 
 	// --- 가운데 남은 자리: 지연 바 + 라벨 ---
@@ -839,33 +574,6 @@ void ServiceControlLayer::UpdateLayout()
 			m_latencyBar->SetLayout(placeRow(cursorLeft, barW));
 			m_latencyLabel->SetLayout(placeRow(cursorLeft + barW + kGap, kLatencyLabelWidth));
 		}
-	}
-
-	// 메뉴는 화질 버튼 위로 올린다. 아래로 열면 창 밖으로 나간다.
-	if (m_qualityMenu && hasQualityMenu && m_qualityButton)
-	{
-		const auto& anchor = m_qualityButton->GetLayout();
-		// UIContextMenuPanel::CalculateContentHeight 와 같은 식이다.
-		// 어긋나면 앵커로 잡은 위치와 실제 메뉴가 어긋난다.
-		const float itemCount = static_cast<float>(m_qualityItems.size());
-		const float menuHeight = kMenuPadding * 2.0f + kMenuItemHeight * itemCount
-			+ (itemCount > 1.0f ? (itemCount - 1.0f) * kMenuSpacing : 0.0f);
-
-		Rect2f menuRect = {};
-		menuRect.left = anchor.left;
-		menuRect.right = anchor.left + kMenuWidth;
-		menuRect.bottom = m_barRect.top - 6.0f;
-		menuRect.top = menuRect.bottom - menuHeight;
-
-		// 오른쪽으로 삐져나가면 창 안으로 당긴다.
-		if (menuRect.right > m_viewWidth - kBarMargin)
-		{
-			const float shift = menuRect.right - (m_viewWidth - kBarMargin);
-			menuRect.left -= shift;
-			menuRect.right -= shift;
-		}
-
-		m_qualityMenu->SetLayout(menuRect);
 	}
 }
 
@@ -890,32 +598,68 @@ void ServiceControlLayer::ApplyPlaybackState()
 
 void ServiceControlLayer::ApplyLatency()
 {
+	const bool known = (m_latency >= 0.0f);
+
 	if (m_latencyBar)
 	{
-		m_latencyBar->SetValue(m_latency);
+		m_latencyBar->SetValue(known ? m_latency : 0.0f);
 	}
 
 	if (m_latencyLabel)
 	{
-		wchar_t text[32] = {};
-		::swprintf_s(text, L"%.0f ms", m_latency);
-		m_latencyLabel->SetText(text);
+		if (known)
+		{
+			wchar_t text[32] = {};
+			::swprintf_s(text, L"%.0f ms", m_latency);
+			m_latencyLabel->SetText(text);
+		}
+		else
+		{
+			m_latencyLabel->SetText(L"--");
+		}
 	}
 }
 
-void ServiceControlLayer::ApplyQualityLabel()
+void ServiceControlLayer::ApplyQualityInfo()
 {
-	if (!m_qualityButton)
+	if (!m_qualityLabel)
 		return;
 
-	if (m_selectedQuality < m_qualityLabels.size())
+	// 해상도를 모르면 나머지도 의미가 없다. 아직 스트림 정보를 못 받은
+	// 상태이므로 "--" 하나로 둔다.
+	if (m_qualityInfo.width == 0 || m_qualityInfo.height == 0)
 	{
-		m_qualityButton->SetText(m_qualityLabels[m_selectedQuality].c_str());
+		m_qualityLabel->SetText(L"--");
+		return;
 	}
-	else
+
+	wchar_t text[64] = {};
+	int written = 0;
+
+	// 1440p / 1080p 식 표기. 세로 픽셀로 쓰는 것이 이 바닥의 관행이고,
+	// 가로까지 적으면 바에서 차지하는 폭이 두 배가 된다.
+	written = ::swprintf_s(text, L"%up", m_qualityInfo.height);
+	if (written < 0)
+		return;
+
+	// 60fps 와 30fps 는 체감이 전혀 다르다. 해상도에 붙여 쓴다.
+	if (m_qualityInfo.fps > 0)
 	{
-		m_qualityButton->SetText(L"--");
+		const int added = ::swprintf_s(text + written, _countof(text) - written,
+			L"%u", m_qualityInfo.fps);
+		if (added > 0)
+			written += added;
 	}
+
+	// 비트레이트는 서버가 혼잡에 따라 계속 움직이는 값이다. 이 바에서
+	// 실제로 변하는 것이 이것뿐이라, 붙여 두면 적응 동작이 눈에 보인다.
+	if (m_qualityInfo.bitrateMbps > 0.0f)
+	{
+		::swprintf_s(text + written, _countof(text) - written,
+			L" · %.1f Mbps", m_qualityInfo.bitrateMbps);
+	}
+
+	m_qualityLabel->SetText(text);
 }
 
 bool ServiceControlLayer::AdvanceFade(float deltaSeconds)
@@ -959,78 +703,12 @@ void ServiceControlLayer::RequestFrame()
 	}
 }
 
-bool ServiceControlLayer::IsQualityMenuOpen() const
-{
-	return m_qualityMenu && m_qualityMenu->IsVisible();
-}
-
-void ServiceControlLayer::OpenQualityMenu()
-{
-	if (!m_qualityMenu || m_qualityItems.empty())
-		return;
-
-	const auto& menuRect = m_qualityMenu->GetLayout();
-	m_qualityMenu->Show(menuRect.left, menuRect.top);
-
-	RequestFrame();
-}
-
-void ServiceControlLayer::CloseQualityMenu()
-{
-	if (m_qualityMenu && m_qualityMenu->IsVisible())
-	{
-		m_qualityMenu->Hide();
-	}
-}
-
 void ServiceControlLayer::OnGlyphButtonClicked(uint32_t commandId, void* userData)
 {
 	ServiceControlLayer* self = static_cast<ServiceControlLayer*>(userData);
 	if (self)
 	{
 		self->InvokeCommand(static_cast<StreamingViewerCommand>(commandId));
-	}
-}
-
-void ServiceControlLayer::OnQualityButtonClicked(uint32_t, void* userData)
-{
-	ServiceControlLayer* self = static_cast<ServiceControlLayer*>(userData);
-	if (!self)
-		return;
-
-	if (self->IsQualityMenuOpen())
-	{
-		self->CloseQualityMenu();
-	}
-	else
-	{
-		self->OpenQualityMenu();
-	}
-}
-
-void ServiceControlLayer::OnQualityItemClicked(uint32_t index, void* userData)
-{
-	ServiceControlLayer* self = static_cast<ServiceControlLayer*>(userData);
-	if (!self)
-		return;
-
-	self->CloseQualityMenu();
-	self->SetSelectedQuality(index);
-
-	if (self->m_qualityCallback)
-	{
-		self->m_qualityCallback(index, self->m_qualityUserData);
-	}
-
-	self->RequestFrame();
-}
-
-void ServiceControlLayer::OnVolumeChanged(float value, void* userData)
-{
-	ServiceControlLayer* self = static_cast<ServiceControlLayer*>(userData);
-	if (self && self->m_volumeCallback)
-	{
-		self->m_volumeCallback(value, self->m_volumeUserData);
 	}
 }
 

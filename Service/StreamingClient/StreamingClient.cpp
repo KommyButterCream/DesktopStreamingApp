@@ -105,7 +105,7 @@ bool StreamingClient::StartClient(const char* ipAddress, const uint16_t port,
 	if (::InterlockedExchange(&m_subscribeWhenReady, FALSE) != FALSE)
 	{
 		ClientSession* clientSession = GetClientSession();
-		if (clientSession && clientSession->IsEstablished())
+		if (clientSession && clientSession->IsEstablished() && ReadFlag(m_autoSubscribe))
 		{
 			SendSubscribe(DESKTOP_STREAM_ID_PRIMARY);
 		}
@@ -219,6 +219,7 @@ bool StreamingClient::SendFeedback(uint64_t decodeDroppedTotal, uint32_t streamI
 
 	return true;
 }
+
 void StreamingClient::SetStreamInfoCallback(StreamInfoCallback callback, void* userData)
 {
 	m_streamInfoCallback = callback;
@@ -320,6 +321,7 @@ bool StreamingClient::HandleStreamInfo(const SC_DESKTOP_STREAMING_INFO_PACKET* i
 	streamContext->codecType = infoPacket->codecType;
 	streamContext->width = infoPacket->width;
 	streamContext->height = infoPacket->height;
+	streamContext->fps = infoPacket->fps;
 
 	CountUp(m_statStreamInfoReceived);
 
@@ -379,6 +381,14 @@ void StreamingClient::OnSessionEstablished(ISession* session)
 
 	NotifyConnectionEvent(DESKTOP_STREAM_CONNECTION_EVENT::Established, DisconnectReason::Unknown, 0);
 
+	// 호스트가 재생을 멈춰 둔 상태다. 접속은 살려 두되 구독은 보내지
+	// 않는다 — 여기서 보내면 사용자가 누른 적 없는 재생이 시작된다.
+	if (!ReadFlag(m_autoSubscribe))
+	{
+		::InterlockedExchange(&m_subscribeWhenReady, FALSE);
+		return;
+	}
+
 	if (!ReadFlag(m_handlersRegistered))
 	{
 		// 핸들러가 아직 없다. 지금 구독을 보내면 응답을 처리할 곳이 없으므로
@@ -388,6 +398,16 @@ void StreamingClient::OnSessionEstablished(ISession* session)
 	}
 
 	SendSubscribe(DESKTOP_STREAM_ID_PRIMARY);
+}
+
+void StreamingClient::SetAutoSubscribe(bool enabled)
+{
+	::InterlockedExchange(&m_autoSubscribe, enabled ? TRUE : FALSE);
+}
+
+bool StreamingClient::IsAutoSubscribeEnabled() const
+{
+	return ReadFlag(m_autoSubscribe);
 }
 
 void StreamingClient::OnConnectFailed(int errorCode)

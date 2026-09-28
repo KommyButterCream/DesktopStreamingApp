@@ -31,13 +31,24 @@ enum class StreamingPlaybackState : uint32_t
 	Paused,
 };
 
-// 화질 항목 하나.
+// 지금 받고 있는 스트림의 화질.
 //
-// 라벨은 호스트가 정한다. 뷰어도 이 DLL 도 "1080p" 가 무슨 뜻인지 알 필요가
-// 없고, 고른 결과는 인덱스로만 돌아간다.
-struct StreamingQualityOption
+// 고르는 값이 아니라 보여주는 값이다. 서버는 인코더 하나로 모든 구독자에게
+// 같은 스트림을 보내므로 뷰어별 해상도라는 개념이 없고, 비트레이트는 서버가
+// 혼잡 신호를 보고 스스로 올리고 내린다. 여기에 선택 UI 를 두면 누른 대로
+// 되지 않는 버튼이 된다.
+//
+// 0 인 항목은 표시에서 빠진다. 스트림 정보를 아직 못 받았으면 전부 0 으로
+// 두면 되고, 그동안은 "--" 가 나온다.
+struct StreamingQualityInfo
 {
-	const wchar_t* label = nullptr;
+	uint32_t width = 0;
+	uint32_t height = 0;
+	uint32_t fps = 0;
+
+	// 최근 구간의 실측 수신 비트레이트. 서버가 설정한 값이 아니라
+	// 이쪽에 실제로 도착한 양이다.
+	float bitrateMbps = 0.0f;
 };
 
 // 뷰어 위에 스트리밍 컨트롤 바를 얹는다.
@@ -61,10 +72,6 @@ class STREAMING_VIEWER_UI_API StreamingViewerUI
 {
 public:
 	using CommandCallback = void (*)(StreamingViewerCommand command, void* userData);
-	using VolumeCallback = void (*)(float volume, void* userData);
-
-	// 사용자가 화질을 골랐다. index 는 SetQualityOptions 에 넘긴 배열의 위치다.
-	using QualityCallback = void (*)(uint32_t index, void* userData);
 
 	StreamingViewerUI();
 	~StreamingViewerUI();
@@ -81,8 +88,6 @@ public:
 
 	// 콜백은 Attach 전후 어느 쪽에서 걸어도 된다.
 	void SetCommandCallback(CommandCallback callback, void* userData);
-	void SetVolumeCallback(VolumeCallback callback, void* userData);
-	void SetQualityCallback(QualityCallback callback, void* userData);
 
 public:
 	// 재생 상태에 따라 버튼 모양이 바뀐다. 상태를 아는 것은 호스트이므로
@@ -91,11 +96,6 @@ public:
 	void SetPlaybackState(StreamingPlaybackState state);
 	StreamingPlaybackState GetPlaybackState() const;
 
-	// 0.0 ~ 1.0. 사용자가 슬라이더를 움직이면 콜백이 오고, 호스트가 이
-	// 함수로 되돌려 주면 콜백은 오지 않는다(순환 방지).
-	void SetVolume(float volume);
-	float GetVolume() const;
-
 	// --- 지연 표시 ---
 	//
 	// 라이브라 되감기가 없으므로 타임라인이 아니다. 대신 "지금 화면이
@@ -103,25 +103,25 @@ public:
 	// 사용자가 알고 싶은 것은 그것뿐이다.
 	//
 	// 눈금 상한은 SetLatencyRange 로 정한다. 넘어가면 가득 찬 채로 멈춘다.
+	//
+	// 음수는 "모른다" 는 뜻이고 "--" 로 표시된다. 재생이 멈춰 있으면
+	// 지터 버퍼 깊이는 남아 있어도 그 값이 화면 지연을 뜻하지 않는다.
+	// 0 ms 로 두면 지연이 없는 것처럼 보이므로 구분한다.
 	void SetLatency(float milliseconds);
 	void SetLatencyRange(float maxMilliseconds);
 	float GetLatency() const;
 
-	// --- 화질 선택 ---
+	// --- 화질 표시 ---
 	//
-	// options 는 이 호출 동안만 읽는다. 라벨 문자열은 DLL 이 복사하므로
-	// 호출자가 계속 들고 있을 필요가 없다.
-	void SetQualityOptions(const StreamingQualityOption* options, uint32_t count);
-	void SetSelectedQuality(uint32_t index);
-	uint32_t GetSelectedQuality() const;
+	// 값이 바뀔 때만 부르면 된다. 같은 값을 다시 넣으면 아무 일도 하지 않고
+	// 돌아가므로, 통계 주기에 맞춰 매번 불러도 비용이 없다.
+	void SetQualityInfo(const StreamingQualityInfo& info);
 
 	// --- 자동 숨김 ---
 	//
 	// 마우스가 멈춰 있으면 바가 서서히 사라지고, 움직이면 다시 나타난다.
 	// 숨겨진 동안에는 입력도 받지 않는다 — 안 보이는 버튼이 클릭을 먹으면
 	// 사용자는 이유를 알 수 없다.
-	//
-	// 화질 메뉴가 열려 있는 동안에는 숨지 않는다.
 	void SetAutoHide(bool enabled);
 	bool IsAutoHideEnabled() const;
 	void SetAutoHideDelay(float seconds);
@@ -147,17 +147,10 @@ private:
 	CommandCallback m_commandCallback = nullptr;
 	void* m_commandUserData = nullptr;
 
-	VolumeCallback m_volumeCallback = nullptr;
-	void* m_volumeUserData = nullptr;
-
-	QualityCallback m_qualityCallback = nullptr;
-	void* m_qualityUserData = nullptr;
-
 	StreamingPlaybackState m_playbackState = StreamingPlaybackState::Stopped;
-	float m_volume = 0.7f;
 	float m_latency = 0.0f;
 	float m_latencyRange = 500.0f;
-	uint32_t m_selectedQuality = 0;
+	StreamingQualityInfo m_qualityInfo = {};
 	bool m_autoHide = true;
 	float m_autoHideDelay = 2.5f;
 	bool m_visible = true;

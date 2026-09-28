@@ -121,6 +121,7 @@ public:
 	uint16_t frameType = 0;
 	uint16_t width = 0;
 	uint16_t height = 0;
+	uint16_t fps = 0;
 
 	uint64_t currentFrameId = 0;
 	uint64_t currentTimestamp = 0;

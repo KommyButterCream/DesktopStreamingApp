@@ -6,8 +6,6 @@
 #include <Windows.h>
 
 #include <memory>
-#include <string>
-#include <vector>
 
 #include "../../../../Module/D3D11EngineInterface/IUIRenderLayer.h"
 #include "../../../../Module/D3D11EngineInterface/IDeviceEventListener.h"
@@ -15,12 +13,10 @@
 
 #include "StreamingViewerUI.h"
 #include "ServiceGlyphButton.h"
-#include "ServiceMenuButton.h"
 
 class IRenderContext;
 class UISlider;
 class UILabel;
-class UIContextMenuPanel;
 class FontManager;
 
 struct ID2D1SolidColorBrush;
@@ -35,7 +31,9 @@ struct ID2D1SolidColorBrush;
 //   화면 하단 가운데에 가로로 붙는다. 창 크기가 바뀌면 OnResize 가 다시
 //   잡는다. 좌표계는 창 픽셀이다(뷰어의 윈도우 오버레이와 같다).
 //
-//   [▶] [■]   지연 ---------- 123 ms   [화질 ▾]   볼륨 ----●--
+//   [▶] [■]   지연 ---------- 123 ms      1440p60 · 18.4 Mbps
+//
+// 오른쪽 화질은 표시 전용이다. 이유는 StreamingQualityInfo 주석 참고.
 class ServiceControlLayer
 	: public IUIRenderLayer
 	, public IResizeEventListener
@@ -78,22 +76,15 @@ public:
 	void SetFrameRequestCallback(FrameRequestCallback callback, void* userData);
 
 	void SetCommandCallback(StreamingViewerUI::CommandCallback callback, void* userData);
-	void SetVolumeCallback(StreamingViewerUI::VolumeCallback callback, void* userData);
-	void SetQualityCallback(StreamingViewerUI::QualityCallback callback, void* userData);
 
 	void SetPlaybackState(StreamingPlaybackState state);
 	StreamingPlaybackState GetPlaybackState() const;
-
-	void SetVolume(float volume);
-	float GetVolume() const;
 
 	void SetLatency(float milliseconds);
 	void SetLatencyRange(float maxMilliseconds);
 	float GetLatency() const;
 
-	void SetQualityOptions(const StreamingQualityOption* options, uint32_t count);
-	void SetSelectedQuality(uint32_t index);
-	uint32_t GetSelectedQuality() const;
+	void SetQualityInfo(const StreamingQualityInfo& info);
 
 	void SetAutoHide(bool enabled);
 	bool IsAutoHideEnabled() const;
@@ -101,7 +92,6 @@ public:
 
 private:
 	bool CreateChildren(IRenderContext* context);
-	bool CreateQualityMenu(IRenderContext* context);
 	bool CreateDeviceResources(IRenderContext* context);
 	void ReleaseDeviceResources();
 
@@ -115,8 +105,8 @@ private:
 	// 지연 값을 바와 라벨에 반영한다.
 	void ApplyLatency();
 
-	// 화질 버튼의 표시 문구를 현재 선택으로 맞춘다.
-	void ApplyQualityLabel();
+	// 화질 정보를 오른쪽 라벨 문구로 만든다.
+	void ApplyQualityInfo();
 
 	// 자동 숨김 알파를 dt 만큼 진행한다. 값이 움직였으면 true.
 	bool AdvanceFade(float deltaSeconds);
@@ -126,14 +116,7 @@ private:
 
 	void RequestFrame();
 
-	bool IsQualityMenuOpen() const;
-	void OpenQualityMenu();
-	void CloseQualityMenu();
-
 	static void OnGlyphButtonClicked(uint32_t commandId, void* userData);
-	static void OnQualityButtonClicked(uint32_t commandId, void* userData);
-	static void OnQualityItemClicked(uint32_t index, void* userData);
-	static void OnVolumeChanged(float value, void* userData);
 
 	void InvokeCommand(StreamingViewerCommand command);
 
@@ -154,19 +137,14 @@ private:
 	std::unique_ptr<ServiceGlyphButton> m_stopButton = nullptr;
 	std::unique_ptr<UISlider> m_latencyBar = nullptr;
 	std::unique_ptr<UILabel> m_latencyLabel = nullptr;
-	std::unique_ptr<ServiceMenuButton> m_qualityButton = nullptr;
-	std::unique_ptr<UISlider> m_volumeSlider = nullptr;
-
-	// 화질 팝업. 프레임워크의 컨텍스트 메뉴를 그대로 쓴다.
-	std::unique_ptr<UIContextMenuPanel> m_qualityMenu = nullptr;
-	std::vector<std::shared_ptr<ServiceMenuButton>> m_qualityItems;
-	std::vector<std::wstring> m_qualityLabels;
-	uint32_t m_selectedQuality = 0;
+	std::unique_ptr<UILabel> m_qualityLabel = nullptr;
 
 	StreamingPlaybackState m_playbackState = StreamingPlaybackState::Stopped;
 
 	float m_latency = 0.0f;
 	float m_latencyRange = 500.0f;
+
+	StreamingQualityInfo m_qualityInfo = {};
 
 	// --- 자동 숨김 ---
 	bool m_autoHide = true;
@@ -181,10 +159,4 @@ private:
 
 	StreamingViewerUI::CommandCallback m_commandCallback = nullptr;
 	void* m_commandUserData = nullptr;
-
-	StreamingViewerUI::VolumeCallback m_volumeCallback = nullptr;
-	void* m_volumeUserData = nullptr;
-
-	StreamingViewerUI::QualityCallback m_qualityCallback = nullptr;
-	void* m_qualityUserData = nullptr;
 };

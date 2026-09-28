@@ -133,13 +133,11 @@
   <ItemGroup>
     <ClInclude Include="ServiceControlLayer.h" />
     <ClInclude Include="ServiceGlyphButton.h" />
-    <ClInclude Include="ServiceMenuButton.h" />
     <ClInclude Include="StreamingViewerUI.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ServiceControlLayer.cpp" />
     <ClCompile Include="ServiceGlyphButton.cpp" />
-    <ClCompile Include="ServiceMenuButton.cpp" />
     <ClCompile Include="StreamingViewerUI.cpp" />
   </ItemGroup>
   <ItemGroup>

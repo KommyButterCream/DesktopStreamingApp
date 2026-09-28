@@ -64,6 +64,14 @@ public:
 	bool SendSubscribe(uint32_t streamId = DESKTOP_STREAM_ID_PRIMARY);
 	bool SendUnsubscribe(uint32_t streamId = DESKTOP_STREAM_ID_PRIMARY);
 
+	// 접속이 성립할 때 자동으로 구독할지 정한다. 기본은 켜짐이다.
+	//
+	// 끄면 접속은 그대로 두고 구독만 보내지 않는다. 사용자가 재생을
+	// 멈춘 동안 재접속이 일어나도 스스로 다시 재생되지 않게 하려는
+	// 것이고, 그때 다시 시작하는 것은 호스트가 SendSubscribe 로 한다.
+	void SetAutoSubscribe(bool enabled);
+	bool IsAutoSubscribeEnabled() const;
+
 	// 수신 상태를 서버에 알린다. 앱이 주기적으로 부른다(1초 권장).
 	//
 	// 직전 호출 이후의 증분을 자동으로 계산해서 보낸다. 누적을 보내면
@@ -126,6 +134,14 @@ private:
 	// 나가지 않고, 증상은 "붙었는데 프레임이 안 온다" 다.
 	volatile LONG m_handlersRegistered = FALSE;
 	volatile LONG m_subscribeWhenReady = FALSE;
+
+	// 접속이 성립하면 스스로 구독할 것인가. 기본은 그렇다.
+	//
+	// 끄는 쪽은 사용자가 재생을 멈춘 호스트다. 그 상태에서 링크가 끊겼다
+	// 다시 붙으면 이 자동 구독이 재생을 되살려 버린다 — 누른 적 없는
+	// 재생이 일어나는 셈이다. 연결 자체는 유지해야 다시 누를 때 즉시
+	// 시작되므로, 끊는 것은 연결이 아니라 구독이다.
+	volatile LONG m_autoSubscribe = TRUE;
 
 	volatile LONG64 m_statChunksAccepted = 0;
 	volatile LONG64 m_statChunksRejected = 0;

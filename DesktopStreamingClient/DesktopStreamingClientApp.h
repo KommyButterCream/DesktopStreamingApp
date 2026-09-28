@@ -118,16 +118,13 @@ public:
 
 		// 스트리밍 컨트롤 바. 뷰어에 외부 렌더 레이어로 얹힌다.
 		//
-		// 뷰어는 이 UI 가 무엇인지 모른다 — 재생이나 볼륨이라는 개념은
-		// 전부 StreamingViewerUI.dll 안에 있고, 뷰어는 그리기 자리와
-		// 마우스만 넘겨준다.
+		// 뷰어는 이 UI 가 무엇인지 모른다 — 재생이라는 개념은 전부
+		// StreamingViewerUI.dll 안에 있고, 뷰어는 그리기 자리와 마우스만
+		// 넘겨준다.
 		m_viewerUI = new StreamingViewerUI();
 		if (m_viewerUI)
 		{
 			m_viewerUI->SetCommandCallback(ViewerUICommandCallback, this);
-			m_viewerUI->SetVolumeCallback(ViewerUIVolumeCallback, this);
-
-			m_viewerUI->SetQualityCallback(ViewerUIQualityCallback, this);
 
 			if (!m_viewerUI->Attach(m_imageView))
 			{
@@ -137,21 +134,12 @@ public:
 			}
 			else
 			{
-				// 화질 목록. 라벨은 호스트가 정하고, 고른 결과는 인덱스로만 온다.
-				// 아직 실제 화질 전환은 붙이지 않았다 — 서버에 그 요청이 없다.
-				static const StreamingQualityOption qualityOptions[] =
-				{
-					{ L"자동" },
-					{ L"원본" },
-					{ L"1080p" },
-					{ L"720p" },
-				};
-
-				m_viewerUI->SetQualityOptions(qualityOptions, _countof(qualityOptions));
-				m_viewerUI->SetSelectedQuality(0);
-
 				// 지연 눈금 상한. 이 값을 넘으면 바가 가득 찬 채로 멈춘다.
 				m_viewerUI->SetLatencyRange(200.0f);
+
+				// 접속이 되면 StreamingClient 가 스스로 구독한다. 즉 앱은
+				// 재생 상태로 뜨는 것이고, 버튼도 그렇게 보여야 한다.
+				PushPlaybackStateToUI();
 			}
 		}
 
@@ -457,59 +445,107 @@ private:
 		}
 	}
 
-	// 컨트롤 바 버튼이 눌렸다.
+	// 컨트롤 바 버튼이 눌렸다. 창 메시지 스레드에서 불린다.
 	//
-	// 1차 검증 단계라 실제 재생 제어는 아직 붙이지 않았다. 지금은 눌린
-	// 사실을 찍고 버튼 모양만 바꾼다 — 레이어 등록 / 그리기 / 히트 테스트 /
-	// 이벤트 전달이 끝까지 이어지는지를 보는 것이 목적이다.
+	// 일시정지와 정지를 의미가 아니라 비용으로 나눈다. 라이브라 되감기가
+	// 없으므로 둘 다 재개하면 현재 시점에 붙는다. 차이는 재개가 얼마나
+	// 싸냐다.
+	//
+	//   일시정지 : 화면만 멈춘다. 대역폭 그대로, 재개는 다음 프레임
+	//   정지     : 구독을 해제한다. 대역폭 0, 재개는 SUBSCRIBE + IDR
 	void OnViewerUICommand(StreamingViewerCommand command)
 	{
-		const char* name = "unknown";
 		switch (command)
 		{
-		case StreamingViewerCommand::Play:  name = "play"; break;
-		case StreamingViewerCommand::Pause: name = "pause"; break;
-		case StreamingViewerCommand::Stop:  name = "stop"; break;
+		case StreamingViewerCommand::Play:  StartPlayback(); break;
+		case StreamingViewerCommand::Pause: PausePlayback(); break;
+		case StreamingViewerCommand::Stop:  StopPlayback();  break;
 		default: break;
 		}
+	}
 
-		printf_s("[viewer-ui] command : %s\n", name);
-
-		if (!m_viewerUI)
+	// 재생. 정지 상태였다면 구독부터 다시 한다.
+	void StartPlayback()
+	{
+		if (m_playbackState == StreamingPlaybackState::Playing)
 			return;
 
-		// 상태를 바꾸는 것은 호스트다. 버튼이 스스로 바꾸지 않는 이유는,
-		// 눌렀다고 재생이 실제로 시작된다는 보장이 없기 때문이다.
-		switch (command)
+		const bool wasStopped = (m_playbackState == StreamingPlaybackState::Stopped);
+		m_playbackState = StreamingPlaybackState::Playing;
+
+		if (wasStopped && m_streamingClient)
 		{
-		case StreamingViewerCommand::Play:
-			m_viewerUI->SetPlaybackState(StreamingPlaybackState::Playing);
-			break;
+			// 자동 구독을 먼저 켠다. 지금 연결이 없어도 재접속이 끝나면
+			// 그쪽에서 구독을 보내 준다.
+			m_streamingClient->SetAutoSubscribe(true);
+			m_streamingClient->SendSubscribe();
 
-		case StreamingViewerCommand::Pause:
-			m_viewerUI->SetPlaybackState(StreamingPlaybackState::Paused);
-			break;
+			// 멈춘 동안 벽시계는 흘렀지만 서버는 인코딩을 쉬었으므로
+			// 프레임 순번은 그 자리에 있다. 기준을 버리지 않으면 재개
+			// 첫 프레임들이 전부 "늦음" 으로 보여 resync 가 연달아 난다.
+			//
+			// 서버가 구독 응답으로 스트림 정보를 다시 보내므로
+			// OnStreamInfo 도 같은 일을 하지만, 그 순서에 기대지 않는다.
+			::InterlockedExchange(&m_paceResetRequest, TRUE);
+		}
 
-		case StreamingViewerCommand::Stop:
-			m_viewerUI->SetPlaybackState(StreamingPlaybackState::Stopped);
-			break;
+		::InterlockedExchange(&m_presentEnabled, TRUE);
 
-		default:
-			break;
+		printf_s("[viewer-ui] play%s\n", wasStopped ? " (resubscribed)" : "");
+		PushPlaybackStateToUI();
+	}
+
+	// 일시정지. 화면만 멈추고 수신과 디코드는 그대로 둔다.
+	//
+	// 디코드나 소비를 멈추면 디코더의 드롭 카운터가 오르고, 그 값은
+	// SendFeedback 으로 서버에 가서 혼잡 신호가 된다. 서버는 2초마다
+	// 비트레이트를 0.75 배로 깎으므로, 일시정지했다는 이유만으로 화질이
+	// 하한까지 내려간다. 그래서 파이프라인은 손대지 않고 표시만 막는다.
+	void PausePlayback()
+	{
+		if (m_playbackState == StreamingPlaybackState::Paused)
+			return;
+
+		m_playbackState = StreamingPlaybackState::Paused;
+		::InterlockedExchange(&m_presentEnabled, FALSE);
+
+		printf_s("[viewer-ui] pause\n");
+		PushPlaybackStateToUI();
+	}
+
+	// 정지. 구독을 해제한다.
+	//
+	// 서버는 구독자가 없으면 OnFrameCallback 첫 줄에서 돌아가므로,
+	// 이 뷰어가 마지막이면 캡처와 인코딩까지 함께 멈춘다.
+	void StopPlayback()
+	{
+		if (m_playbackState == StreamingPlaybackState::Stopped)
+			return;
+
+		m_playbackState = StreamingPlaybackState::Stopped;
+		::InterlockedExchange(&m_presentEnabled, FALSE);
+
+		if (m_streamingClient)
+		{
+			// 순서가 중요하다. 자동 구독을 먼저 끄지 않으면 해제 직후
+			// 재접속이 일어났을 때 스스로 다시 구독해 버린다.
+			m_streamingClient->SetAutoSubscribe(false);
+			m_streamingClient->SendUnsubscribe();
+		}
+
+		printf_s("[viewer-ui] stop (unsubscribed)\n");
+		PushPlaybackStateToUI();
+	}
+
+	void PushPlaybackStateToUI()
+	{
+		if (m_viewerUI)
+		{
+			m_viewerUI->SetPlaybackState(m_playbackState);
 		}
 	}
 
-	void OnViewerUIVolume(float volume)
-	{
-		printf_s("[viewer-ui] volume  : %.2f\n", volume);
-	}
-
-	void OnViewerUIQuality(uint32_t index)
-	{
-		printf_s("[viewer-ui] quality : %u\n", index);
-	}
-
-	// 컨트롤 바의 지연 표시를 갱신한다.
+	// 컨트롤 바의 지연 표시와 화질 표시를 갱신한다.
 	//
 	// 끝에서 끝까지의 지연은 서버와 시계를 맞춰야 알 수 있고 지금 그런
 	// 수단이 없다. 대신 클라이언트가 실제로 아는 것을 보여준다 —
@@ -523,14 +559,72 @@ private:
 		if (now < m_nextViewerUITick)
 			return;
 
+		const ULONGLONG previousTick = m_lastViewerUITick;
+		m_lastViewerUITick = now;
 		m_nextViewerUITick = now + VIEWER_UI_INTERVAL_MS;
 
-		const float bufferMs = static_cast<float>(::ReadAcquire(&m_jitterBufferMs));
-		const float avgWaitMs = (m_paceWaitCount > 0)
-			? static_cast<float>(m_paceWaitTotalMs) / static_cast<float>(m_paceWaitCount)
-			: 0.0f;
+		// 정지 중에는 화면이 멈춰 있으므로 지연이라는 값 자체가 없다.
+		// 지터 버퍼 깊이는 그대로 남아 있지만 그건 화면 지연이 아니다.
+		// 0 ms 로 두면 지연이 없는 것처럼 보이므로 "모름" 으로 보낸다.
+		const bool stopped = (m_playbackState == StreamingPlaybackState::Stopped);
 
-		m_viewerUI->SetLatency(bufferMs + avgWaitMs);
+		if (stopped)
+		{
+			m_viewerUI->SetLatency(-1.0f);
+		}
+		else
+		{
+			const float bufferMs = static_cast<float>(::ReadAcquire(&m_jitterBufferMs));
+			const float avgWaitMs = (m_paceWaitCount > 0)
+				? static_cast<float>(m_paceWaitTotalMs) / static_cast<float>(m_paceWaitCount)
+				: 0.0f;
+
+			m_viewerUI->SetLatency(bufferMs + avgWaitMs);
+		}
+
+		// --- 화질 표시 ---
+		//
+		// 해상도와 fps 는 서버가 SC_INFO 로 알려준 값이고, 비트레이트는
+		// 서버가 설정한 목표치가 아니라 이 구간에 실제로 도착한 양이다.
+		// 서버의 목표치를 보여주면 혼잡으로 실제 수신이 무너진 순간에도
+		// 숫자는 멀쩡해 보인다 — 그러면 표시할 이유가 없다.
+		DesktopStreamingClientStats netStats = {};
+		if (m_streamingClient)
+			m_streamingClient->GetStats(netStats);
+
+		const LONG64 geometry = ::ReadAcquire64(&m_streamGeometry);
+
+		// 정지 중이면 전부 0 으로 둔다. 받는 것이 없으니 해상도도 지금
+		// 스트림의 것이 아니고, 0.0 Mbps 를 띄우느니 "--" 가 정확하다.
+		StreamingQualityInfo qualityInfo = {};
+
+		if (!stopped)
+		{
+			qualityInfo.width = static_cast<uint32_t>((geometry >> 32) & 0xFFFF);
+			qualityInfo.height = static_cast<uint32_t>((geometry >> 16) & 0xFFFF);
+			qualityInfo.fps = static_cast<uint32_t>(geometry & 0xFFFF);
+
+			const ULONGLONG elapsedMs = (previousTick > 0 && now > previousTick)
+				? (now - previousTick) : 0;
+
+			if (elapsedMs > 0 && netStats.chunkBytesReceived >= m_lastQualityBytes)
+			{
+				const uint64_t deltaBytes = netStats.chunkBytesReceived - m_lastQualityBytes;
+
+				// bytes/ms -> Mbps : *8 로 비트, /1000 으로 초, /1e6 으로 메가.
+				qualityInfo.bitrateMbps =
+					static_cast<float>(deltaBytes) * 8.0f / static_cast<float>(elapsedMs) / 1000.0f;
+			}
+		}
+
+		// 기준은 정지 중에도 옮긴다. 그래야 재개 직후 첫 구간이 멈춰
+		// 있던 시간까지 포함한 엉뚱한 평균이 되지 않는다.
+		//
+		// 재접속으로 카운터가 0 으로 돌아가면 위 비교가 막아 주고,
+		// 기준만 새 값으로 옮겨 다음 구간부터 다시 잰다.
+		m_lastQualityBytes = netStats.chunkBytesReceived;
+
+		m_viewerUI->SetQualityInfo(qualityInfo);
 	}
 
 	// 컨트롤 바에서 버튼을 눌렀다. 창 메시지 스레드에서 불린다.
@@ -540,24 +634,6 @@ private:
 		if (self)
 		{
 			self->OnViewerUICommand(command);
-		}
-	}
-
-	static void ViewerUIQualityCallback(uint32_t index, void* userData)
-	{
-		DesktopStreamingClientApp* self = static_cast<DesktopStreamingClientApp*>(userData);
-		if (self)
-		{
-			self->OnViewerUIQuality(index);
-		}
-	}
-
-	static void ViewerUIVolumeCallback(float volume, void* userData)
-	{
-		DesktopStreamingClientApp* self = static_cast<DesktopStreamingClientApp*>(userData);
-		if (self)
-		{
-			self->OnViewerUIVolume(volume);
 		}
 	}
 
@@ -670,6 +746,11 @@ private:
 			streamContext.streamInfoVersion,
 			streamContext.codecConfigVersion);
 
+		// 컨트롤 바의 화질 표시가 읽는다. 다음 ServiceViewerUI 틱에
+		// 비트레이트와 함께 올라간다. 읽는 쪽은 앱 스레드다.
+		::InterlockedExchange64(&m_streamGeometry,
+			PackStreamGeometry(streamContext.width, streamContext.height, streamContext.fps));
+
 		// 스트림이 바뀌면 페이싱 기준도 다시 잡아야 한다. 다음 프레임이
 		// 잡도록 무효로 표시한다.
 		::InterlockedExchange(&m_paceResetRequest, TRUE);
@@ -735,7 +816,19 @@ private:
 		if (!frame.sharedHandle)
 			return;
 
+		// 페이싱은 멈춰 있어도 그대로 돈다. 프레임을 계속 실시간으로
+		// 소비해야 기준 시각이 유효한 채로 남고, 그래야 재개가 다음
+		// 프레임 한 장으로 끝난다.
 		PaceFramePresentation(frame.timestamp);
+
+		// 일시정지 / 정지. 화면 갱신만 건너뛴다.
+		//
+		// 게이트가 파이프라인 맨 끝에 있는 이유는, 여기까지 오면 프레임이
+		// 이미 디코더에서 "전달됨" 으로 처리된 뒤라 어떤 드롭 카운터도
+		// 오르지 않기 때문이다. 앞쪽에서 막으면 그 드롭이 피드백을 타고
+		// 서버로 가서 비트레이트를 깎는다. (PausePlayback 주석 참고)
+		if (::ReadAcquire(&m_presentEnabled) == FALSE)
+			return;
 
 		m_imageView->UpdateSharedTexture(frame.sharedHandle);
 		++m_presentedFrames;
@@ -807,6 +900,45 @@ private:
 	ULONGLONG m_nextReconnectTick = 0;
 	ULONGLONG m_nextFeedbackTick = 0;
 	ULONGLONG m_nextViewerUITick = 0;
+
+	// --- 컨트롤 바의 화질 표시 ---
+	//
+	// 비트레이트는 두 틱 사이의 수신 바이트 증분으로 잰다. 앱 스레드만
+	// 만지므로 평범한 멤버다.
+	ULONGLONG m_lastViewerUITick = 0;
+	uint64_t m_lastQualityBytes = 0;
+
+	// 해상도와 fps 는 OnStreamInfo 가 쓰고 ServiceViewerUI 가 읽는다.
+	// 전자는 IOCP 워커 스레드, 후자는 앱 스레드다.
+	//
+	// 셋을 각각 원자 변수로 두면 해상도가 바뀌는 순간 width 만 새 값이고
+	// height 는 옛 값인 조합을 읽을 수 있다. 화면에 잠깐 "1440p" 대신
+	// 엉뚱한 수가 뜨는 정도지만, 셋 다 uint16 이라 한 LONG64 에 들어간다.
+	// 묶어 두면 그 조합 자체가 생기지 않는다.
+	//
+	//   [47:32] width   [31:16] height   [15:0] fps
+	volatile LONG64 m_streamGeometry = 0;
+
+	// --- 재생 제어 ---
+	//
+	// 상태는 앱 스레드만 만진다. 버튼 콜백도 창 메시지 스레드에서 오므로
+	// 같은 스레드다.
+	//
+	// 시작 상태가 Playing 인 것은 이것이 "사용자가 원하는 것" 이기 때문이다.
+	// 접속이 성립하면 StreamingClient 가 스스로 구독하므로, 앱이 뜬 순간부터
+	// 사용자는 재생을 원하는 상태다.
+	StreamingPlaybackState m_playbackState = StreamingPlaybackState::Playing;
+
+	// 디코드 스레드가 읽고 앱 스레드가 쓴다. 이 값이 FALSE 면
+	// OnDecodedFrame 이 화면 갱신만 건너뛴다.
+	volatile LONG m_presentEnabled = TRUE;
+
+	static LONG64 PackStreamGeometry(uint32_t width, uint32_t height, uint32_t fps)
+	{
+		return (static_cast<LONG64>(width & 0xFFFF) << 32)
+			| (static_cast<LONG64>(height & 0xFFFF) << 16)
+			| static_cast<LONG64>(fps & 0xFFFF);
+	}
 
 	// 지터 버퍼. 디코드 스레드가 읽고 앱 스레드가 바꿀 수 있어 원자적이다.
 	volatile LONG m_jitterBufferMs = DEFAULT_JITTER_BUFFER_MS;
