@@ -625,6 +625,58 @@ private:
 		m_lastQualityBytes = netStats.chunkBytesReceived;
 
 		m_viewerUI->SetQualityInfo(qualityInfo);
+
+		ServiceStatsOverlay(now, previousTick, netStats, qualityInfo);
+	}
+
+	// 진단 오버레이에 넣을 값을 모은다.
+	//
+	// 손실 카운터를 하나로 합치지 않고 다섯을 따로 넘기는 것이 요점이다.
+	// 서버로 가는 피드백은 합계여도 되지만(서버는 "이 뷰어가 못 따라간다"
+	// 하나만 알면 된다), 화면 앞에 앉은 사람은 어느 단계가 막혔는지를
+	// 알아야 한다. 합쳐 버리면 그 정보가 사라진다.
+	void ServiceStatsOverlay(ULONGLONG now, ULONGLONG previousTick,
+		const DesktopStreamingClientStats& netStats,
+		const StreamingQualityInfo& qualityInfo)
+	{
+		NvDecStats decodeStats = {};
+		if (m_nvDecoder)
+			m_nvDecoder->GetStats(decodeStats);
+
+		StreamingStatsInfo stats = {};
+		stats.connected = netStats.connected;
+
+		stats.bitrateMbps = qualityInfo.bitrateMbps;
+		stats.latencyMs = m_viewerUI->GetLatency();
+
+		// 실제로 화면에 올라간 프레임 수로 잰다. 디코드된 수가 아니다 —
+		// 둘이 벌어지는 것 자체가 표시 쪽이 밀린다는 신호이고, 그건
+		// 아래 손실 줄이 따로 말해 준다.
+		const ULONGLONG elapsedMs = (previousTick > 0 && now > previousTick)
+			? (now - previousTick) : 0;
+
+		if (elapsedMs > 0 && m_presentedFrames >= m_lastPresentedFrames)
+		{
+			const uint64_t delta = m_presentedFrames - m_lastPresentedFrames;
+			stats.presentedFps =
+				static_cast<float>(delta) * 1000.0f / static_cast<float>(elapsedMs);
+		}
+
+		m_lastPresentedFrames = m_presentedFrames;
+
+		stats.chunksRejected = netStats.chunksRejected;
+		stats.framesDiscarded = netStats.framesDiscarded;
+		stats.decodeQueueDrops = decodeStats.droppedInputQueue;
+		stats.poolExhausted = decodeStats.droppedPoolExhausted;
+		stats.notConsumed = decodeStats.droppedNotConsumed;
+
+		stats.jitterBufferMs = static_cast<uint32_t>(::ReadAcquire(&m_jitterBufferMs));
+		stats.avgPaceWaitMs = (m_paceWaitCount > 0)
+			? static_cast<float>(m_paceWaitTotalMs) / static_cast<float>(m_paceWaitCount)
+			: 0.0f;
+		stats.resyncCount = m_paceResyncCount;
+
+		m_viewerUI->SetStatsInfo(stats);
 	}
 
 	// 컨트롤 바에서 버튼을 눌렀다. 창 메시지 스레드에서 불린다.
@@ -955,6 +1007,14 @@ private:
 	uint64_t m_paceWaitCount = 0;
 	uint64_t m_paceResyncCount = 0;
 	uint64_t m_presentedFrames = 0;
+
+	// 표시 fps 를 재려고 앱 스레드가 들고 있는 직전 값.
+	//
+	// m_presentedFrames 를 앱 스레드에서 읽는 것은 원자적이지 않지만,
+	// x64 에서 정렬된 8바이트 읽기는 찢어지지 않고 한 틱 늦은 값이
+	// 나와도 fps 표시가 0.x 흔들릴 뿐이다. 기존 PrintStats 도 같은
+	// 카운터를 같은 방식으로 읽는다.
+	uint64_t m_lastPresentedFrames = 0;
 
 	// 스트림 정보에서 받은 프레임률. 페이싱 간격의 기준이다.
 	volatile LONG m_streamFpsAtomic = 60;

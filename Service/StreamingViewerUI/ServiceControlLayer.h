@@ -77,6 +77,13 @@ public:
 
 	void SetCommandCallback(StreamingViewerUI::CommandCallback callback, void* userData);
 
+	// 오버레이 토글 버튼이 눌렸다는 통지. 이 레이어는 통계 패널을
+	// 알지 못한다 — 그것은 별도 레이어고, 묶는 것은 파사드가 한다.
+	void SetStatsToggleCallback(FrameRequestCallback callback, void* userData);
+
+	// 토글 버튼의 켜짐 표시를 맞춤다.
+	void SetStatsActive(bool active);
+
 	void SetPlaybackState(StreamingPlaybackState state);
 	StreamingPlaybackState GetPlaybackState() const;
 
@@ -117,6 +124,7 @@ private:
 	void RequestFrame();
 
 	static void OnGlyphButtonClicked(uint32_t commandId, void* userData);
+	static void OnStatsButtonClicked(uint32_t commandId, void* userData);
 
 	void InvokeCommand(StreamingViewerCommand command);
 
@@ -138,6 +146,7 @@ private:
 	std::unique_ptr<UISlider> m_latencyBar = nullptr;
 	std::unique_ptr<UILabel> m_latencyLabel = nullptr;
 	std::unique_ptr<UILabel> m_qualityLabel = nullptr;
+	std::unique_ptr<ServiceGlyphButton> m_statsButton = nullptr;
 
 	StreamingPlaybackState m_playbackState = StreamingPlaybackState::Stopped;
 
@@ -159,4 +168,7 @@ private:
 
 	StreamingViewerUI::CommandCallback m_commandCallback = nullptr;
 	void* m_commandUserData = nullptr;
+
+	FrameRequestCallback m_statsToggleCallback = nullptr;
+	void* m_statsToggleUserData = nullptr;
 };

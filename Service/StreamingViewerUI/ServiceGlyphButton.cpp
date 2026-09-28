@@ -96,6 +96,16 @@ ServiceGlyph ServiceGlyphButton::GetGlyph() const
 	return m_glyph;
 }
 
+void ServiceGlyphButton::SetActive(bool active)
+{
+	m_active = active;
+}
+
+bool ServiceGlyphButton::IsActive() const
+{
+	return m_active;
+}
+
 void ServiceGlyphButton::SetCommandId(uint32_t commandId)
 {
 	m_commandId = commandId;
@@ -150,8 +160,13 @@ const UIColorSet& ServiceGlyphButton::CurrentColorSet() const
 	case UIElementState::Hovered:  return m_style.hover;
 	case UIElementState::Pressed:  return m_style.pressed;
 	case UIElementState::Disabled: return m_style.disabled;
-	default:                       return m_style.normal;
+	default: break;
 	}
+
+	// 켜져 있는 토글은 평상시에도 눌린 색으로 남는다. hover 는 그보다
+	// 우선한다 — 마우스가 올라간 것은 지금 일어나는 일이고, 켜져 있다는
+	// 것은 배경이 원래 밝다는 뜻이라 둘이 겹치면 반응이 사라진다.
+	return m_active ? m_style.pressed : m_style.normal;
 }
 
 // 도형은 버튼 사각형 안쪽에 정규화 비율로 그린다. 버튼 크기가 바뀌어도
@@ -230,6 +245,31 @@ void ServiceGlyphButton::DrawGlyph(ID2D1DeviceContext* d2dContext) const
 		d2dContext->FillRectangle(
 			D2D1::RectF(center.x - half, center.y - half, center.x + half, center.y + half),
 			m_glyphBrush);
+		break;
+	}
+
+	case ServiceGlyph::Stats:
+	{
+		// 높이가 다른 막대 셋. 톱니바퀴보다 이쪽을 쓴 이유는 두 가지다.
+		// 28px 에서 톱니는 이가 뭉개져 동그라미로 보이고, 이 패널이
+		// 여는 것은 설정이 아니라 측정값이다.
+		const float barWidth = half * 0.36f;
+		const float gap = half * 0.18f;
+		const float step = barWidth + gap;
+
+		// 0.45 / 0.75 / 1.0 로 올라가는 세 막대. 전부 바닥선에 맞춘다.
+		const float heights[3] = { half * 0.9f, half * 1.5f, half * 2.0f };
+		const float bottom = center.y + half;
+		const float left = center.x - (step * 3.0f - gap) * 0.5f;
+
+		for (int index = 0; index < 3; ++index)
+		{
+			const float barLeft = left + step * static_cast<float>(index);
+
+			d2dContext->FillRectangle(
+				D2D1::RectF(barLeft, bottom - heights[index], barLeft + barWidth, bottom),
+				m_glyphBrush);
+		}
 		break;
 	}
 

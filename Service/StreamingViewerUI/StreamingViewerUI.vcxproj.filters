@@ -23,6 +23,9 @@
     <ClInclude Include="ServiceControlLayer.h">
       <Filter>Render Layer</Filter>
     </ClInclude>
+    <ClInclude Include="ServiceStatsLayer.h">
+      <Filter>Render Layer</Filter>
+    </ClInclude>
     <ClInclude Include="ServiceGlyphButton.h">
       <Filter>Widget</Filter>
     </ClInclude>
@@ -32,6 +35,9 @@
       <Filter>소스 파일</Filter>
     </ClCompile>
     <ClCompile Include="ServiceControlLayer.cpp">
+      <Filter>Render Layer</Filter>
+    </ClCompile>
+    <ClCompile Include="ServiceStatsLayer.cpp">
       <Filter>Render Layer</Filter>
     </ClCompile>
     <ClCompile Include="ServiceGlyphButton.cpp">

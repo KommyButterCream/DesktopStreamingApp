@@ -16,6 +16,7 @@ enum class ServiceGlyph : uint32_t
 	Play,    // 오른쪽을 가리키는 삼각형
 	Pause,   // 세로 막대 둘
 	Stop,    // 정사각형
+	Stats,   // 높이가 다른 막대 셋 (통계 오버레이 토글)
 };
 
 // 도형 하나를 그리는 버튼.
@@ -44,6 +45,14 @@ public:
 	void SetGlyph(ServiceGlyph glyph);
 	ServiceGlyph GetGlyph() const;
 
+	// 토글 버튼이 켜져 있는 상태. 배경이 항상 눌린 색으로 남는다.
+	//
+	// UIElementBase 의 상태 머신에는 "켜짐" 이 없다. Pressed 는 마우스를
+	// 누르고 있는 동안만이라 손을 떼면 풀린다. 눌러서 켜 두는 버튼은
+	// 뗀 뒤에도 켜져 보여야 하므로 별도 표시가 필요하다.
+	void SetActive(bool active);
+	bool IsActive() const;
+
 	void SetCommandId(uint32_t commandId);
 	void SetClickCallback(ClickCallback callback, void* userData);
 
@@ -70,6 +79,7 @@ private:
 
 private:
 	ServiceGlyph m_glyph = ServiceGlyph::None;
+	bool m_active = false;
 	uint32_t m_commandId = 0;
 
 	float m_glyphScale = 0.42f;

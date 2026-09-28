@@ -1,5 +1,6 @@
 ﻿#include "StreamingViewerUI.h"
 #include "ServiceControlLayer.h"
+#include "ServiceStatsLayer.h"
 
 #include "../../../../Module/D3D11ImageView/D3D11ImageView/D3D11ImageView.h"
 
@@ -34,6 +35,25 @@ bool StreamingViewerUI::Attach(D3D11ImageView* viewer)
 		return false;
 	}
 
+	// 통계 패널은 별도 레이어다. 컨트롤 바의 자식으로 두면 바가 자동
+	// 숨김으로 사라질 때 통계도 같이 사라지는데, 한참 들여다봐야 하는
+	// 값들이라 그러면 쓸 수가 없다.
+	//
+	// 실패해도 컨트롤 바는 살린다. 진단 패널이 없다고 재생까지 막을
+	// 이유는 없다.
+	ServiceStatsLayer* statsLayer = new (std::nothrow) ServiceStatsLayer();
+	if (statsLayer)
+	{
+		if (viewer->AddRenderLayer(statsLayer, RenderLayerSlot::Topmost))
+		{
+			m_statsLayer = statsLayer;
+		}
+		else
+		{
+			delete statsLayer;
+		}
+	}
+
 	m_viewer = viewer;
 	m_layer = layer;
 
@@ -43,21 +63,32 @@ bool StreamingViewerUI::Attach(D3D11ImageView* viewer)
 
 void StreamingViewerUI::Detach()
 {
-	if (!m_viewer || !m_layer)
+	if (!m_viewer)
 	{
 		// 붙인 적이 없어도 레이어만 남아 있을 수는 없다. 그래도 방어한다.
+		delete m_statsLayer;
 		delete m_layer;
+		m_statsLayer = nullptr;
 		m_layer = nullptr;
-		m_viewer = nullptr;
 		return;
 	}
 
 	// 뷰어가 렌더 락 안에서 떼어내고 Shutdown 을 불러 준다.
 	// 반환한 뒤에는 렌더 스레드가 이 레이어를 부르지 않는다.
-	m_viewer->RemoveRenderLayer(static_cast<IUIRenderLayer*>(m_layer));
+	if (m_statsLayer)
+	{
+		m_viewer->RemoveRenderLayer(m_statsLayer);
+		delete m_statsLayer;
+		m_statsLayer = nullptr;
+	}
 
-	delete m_layer;
-	m_layer = nullptr;
+	if (m_layer)
+	{
+		m_viewer->RemoveRenderLayer(static_cast<IUIRenderLayer*>(m_layer));
+		delete m_layer;
+		m_layer = nullptr;
+	}
+
 	m_viewer = nullptr;
 }
 
@@ -73,21 +104,39 @@ bool StreamingViewerUI::IsAttached() const
 // 한 곳에서 한다.
 void StreamingViewerUI::ApplyPendingSettings()
 {
-	if (!m_layer)
-		return;
+	if (m_layer)
+	{
+		m_layer->SetFrameRequestCallback(&StreamingViewerUI::RequestFrame, this);
+		m_layer->SetStatsToggleCallback(&StreamingViewerUI::ToggleStats, this);
 
-	m_layer->SetFrameRequestCallback(&StreamingViewerUI::RequestFrame, this);
+		m_layer->SetCommandCallback(m_commandCallback, m_commandUserData);
 
-	m_layer->SetCommandCallback(m_commandCallback, m_commandUserData);
+		m_layer->SetAutoHideDelay(m_autoHideDelay);
+		m_layer->SetAutoHide(m_autoHide);
 
-	m_layer->SetAutoHideDelay(m_autoHideDelay);
-	m_layer->SetAutoHide(m_autoHide);
+		m_layer->SetPlaybackState(m_playbackState);
+		m_layer->SetLatencyRange(m_latencyRange);
+		m_layer->SetLatency(m_latency);
+		m_layer->SetQualityInfo(m_qualityInfo);
+		m_layer->SetVisible(m_visible);
+		m_layer->SetStatsActive(m_statsVisible);
+	}
 
-	m_layer->SetPlaybackState(m_playbackState);
-	m_layer->SetLatencyRange(m_latencyRange);
-	m_layer->SetLatency(m_latency);
-	m_layer->SetQualityInfo(m_qualityInfo);
-	m_layer->SetVisible(m_visible);
+	if (m_statsLayer)
+	{
+		m_statsLayer->SetQualityInfo(m_qualityInfo);
+		m_statsLayer->SetStatsInfo(m_statsInfo);
+		m_statsLayer->SetVisible(m_statsVisible);
+	}
+}
+
+void StreamingViewerUI::ToggleStats(void* userData)
+{
+	StreamingViewerUI* self = static_cast<StreamingViewerUI*>(userData);
+	if (self)
+	{
+		self->SetStatsVisible(!self->m_statsVisible);
+	}
 }
 
 void StreamingViewerUI::RequestFrame(void* userData)
@@ -168,8 +217,56 @@ void StreamingViewerUI::SetQualityInfo(const StreamingQualityInfo& info)
 		m_layer->SetQualityInfo(info);
 	}
 
+	if (m_statsLayer)
+	{
+		m_statsLayer->SetQualityInfo(info);
+	}
+
 	// 지연과 같은 이유로 프레임을 강제하지 않는다. 해상도가 바뀌면
 	// 새 프레임이 뒤따라 오므로 그때 함께 반영된다.
+}
+
+void StreamingViewerUI::SetStatsInfo(const StreamingStatsInfo& stats)
+{
+	m_statsInfo = stats;
+
+	if (m_statsLayer)
+	{
+		m_statsLayer->SetStatsInfo(stats);
+	}
+
+	// 보이는 동안에는 프레임을 요청한다. 정지 화면에서 오버레이를 켜 두면
+	// 새 프레임이 오지 않아 숫자가 멈춘 것처럼 보이는데, 그때가 바로
+	// 무엇이 멈췄는지 보려고 켜 둔 때다.
+	if (m_statsVisible && m_viewer)
+	{
+		m_viewer->InvalidateFrame();
+	}
+}
+
+void StreamingViewerUI::SetStatsVisible(bool visible)
+{
+	m_statsVisible = visible;
+
+	if (m_statsLayer)
+	{
+		m_statsLayer->SetVisible(visible);
+	}
+
+	if (m_layer)
+	{
+		m_layer->SetStatsActive(visible);
+	}
+
+	if (m_viewer)
+	{
+		m_viewer->InvalidateFrame();
+	}
+}
+
+bool StreamingViewerUI::IsStatsVisible() const
+{
+	return m_statsVisible;
 }
 
 void StreamingViewerUI::SetAutoHide(bool enabled)

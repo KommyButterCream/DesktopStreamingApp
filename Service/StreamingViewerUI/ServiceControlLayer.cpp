@@ -25,6 +25,10 @@ namespace
 
 	// "1440p60 · 18.4 Mbps" 가 잘리지 않을 만큼.
 	constexpr float kQualityWidth = 150.0f;
+
+	// 오버레이 토글이 쓰는 명령 값. StreamingViewerCommand 와 겹치지
+	// 않게 띄운다 — 두 콜백이 같은 함수 시그니처를 쓴다.
+	constexpr uint32_t kStatsButtonCommandId = 2000;
 	constexpr float kLatencyLabelWidth = 62.0f;
 	constexpr float kLatencyBarMinWidth = 60.0f;
 
@@ -111,6 +115,7 @@ void ServiceControlLayer::Shutdown()
 	}
 
 	// 자식이 들고 있는 D2D 리소스가 컨텍스트보다 오래 살면 안 된다.
+	m_statsButton.reset();
 	m_qualityLabel.reset();
 	m_latencyLabel.reset();
 	m_latencyBar.reset();
@@ -189,6 +194,7 @@ bool ServiceControlLayer::Render()
 	if (m_latencyBar)      m_latencyBar->Render();
 	if (m_latencyLabel)    m_latencyLabel->Render();
 	if (m_qualityLabel)    m_qualityLabel->Render();
+	if (m_statsButton)     m_statsButton->Render();
 
 	if (needsOpacityLayer)
 	{
@@ -218,6 +224,7 @@ bool ServiceControlLayer::OnMouseEvent(UIMouseEventType type, float x, float y)
 	{
 		if (m_playPauseButton) m_playPauseButton->OnMouseEvent(type, x, y);
 		if (m_stopButton)      m_stopButton->OnMouseEvent(type, x, y);
+		if (m_statsButton)     m_statsButton->OnMouseEvent(type, x, y);
 		return false;
 	}
 
@@ -242,6 +249,7 @@ bool ServiceControlLayer::OnMouseEvent(UIMouseEventType type, float x, float y)
 		// 여기서 소비하면 영상 위 팬/줌이 죽는다.
 		if (m_playPauseButton) m_playPauseButton->OnMouseEvent(UIMouseEventType::Move, -1.0f, -1.0f);
 		if (m_stopButton)      m_stopButton->OnMouseEvent(UIMouseEventType::Move, -1.0f, -1.0f);
+		if (m_statsButton)     m_statsButton->OnMouseEvent(UIMouseEventType::Move, -1.0f, -1.0f);
 		return false;
 	}
 
@@ -251,9 +259,13 @@ bool ServiceControlLayer::OnMouseEvent(UIMouseEventType type, float x, float y)
 	{
 		// 소비됨
 	}
-	else if (m_stopButton)
+	else if (m_stopButton && m_stopButton->OnMouseEvent(type, x, y))
 	{
-		m_stopButton->OnMouseEvent(type, x, y);
+		// 소비됨
+	}
+	else if (m_statsButton)
+	{
+		m_statsButton->OnMouseEvent(type, x, y);
 	}
 
 	RequestFrame();
@@ -300,6 +312,7 @@ void ServiceControlLayer::OnDeviceLost()
 	if (m_latencyBar)      m_latencyBar->DiscardDeviceResources();
 	if (m_latencyLabel)    m_latencyLabel->DiscardDeviceResources();
 	if (m_qualityLabel)    m_qualityLabel->DiscardDeviceResources();
+	if (m_statsButton)     m_statsButton->DiscardDeviceResources();
 }
 
 void ServiceControlLayer::OnDeviceRestored()
@@ -314,6 +327,7 @@ void ServiceControlLayer::OnDeviceRestored()
 	if (m_latencyBar)      m_latencyBar->RestoreDeviceResources(m_context);
 	if (m_latencyLabel)    m_latencyLabel->RestoreDeviceResources(m_context);
 	if (m_qualityLabel)    m_qualityLabel->RestoreDeviceResources(m_context);
+	if (m_statsButton)     m_statsButton->RestoreDeviceResources(m_context);
 
 	UpdateLayout();
 }
@@ -455,10 +469,17 @@ bool ServiceControlLayer::CreateChildren(IRenderContext* context)
 	textStyle.hAlign = DWRITE_TEXT_ALIGNMENT_LEADING;
 	textStyle.vAlign = DWRITE_PARAGRAPH_ALIGNMENT_CENTER;
 
+	// 두 라벨 모두 여기서 문구를 넣지 않는다. Initialize 가 끝난 뒤
+	// UpdateLayout → ApplyLatency / ApplyQualityInfo 순으로 넣는다.
+	//
+	// UIElementBase::SetLayout 은 텍스트 레이아웃을 무효화하지 않는다.
+	// 레이아웃 전에 넣은 문구는 0 크기로 레이아웃을 시도했다가 실패하고
+	// 더티 플래그까지 지워진다. 그 뒤 같은 문구를 다시 넣으면 SetText 가
+	// 바뀐 게 없다며 걸러서, 화질 라벨은 스트림 정보가 오기 전까지
+	// 비어 있었다("--" → "--").
 	m_latencyLabel = std::make_unique<UILabel>();
 	m_latencyLabel->SetFontManager(m_fontManager);
 	m_latencyLabel->SetTextStyle(textStyle);
-	m_latencyLabel->SetText(L"-- ms");
 	if (!m_latencyLabel->Initialize(context))
 		return false;
 
@@ -473,8 +494,16 @@ bool ServiceControlLayer::CreateChildren(IRenderContext* context)
 	m_qualityLabel = std::make_unique<UILabel>();
 	m_qualityLabel->SetFontManager(m_fontManager);
 	m_qualityLabel->SetTextStyle(qualityTextStyle);
-	m_qualityLabel->SetText(L"--");
 	if (!m_qualityLabel->Initialize(context))
+		return false;
+
+	// 진단 오버레이 토글. 바의 맨 오른쪽 끝이다.
+	m_statsButton = std::make_unique<ServiceGlyphButton>();
+	m_statsButton->SetStyle(buttonStyle);
+	m_statsButton->SetGlyph(ServiceGlyph::Stats);
+	m_statsButton->SetCommandId(kStatsButtonCommandId);
+	m_statsButton->SetClickCallback(&ServiceControlLayer::OnStatsButtonClicked, this);
+	if (!m_statsButton->Initialize(context))
 		return false;
 
 	return true;
@@ -550,8 +579,14 @@ void ServiceControlLayer::UpdateLayout()
 		cursorLeft += kButtonSize + kGap;
 	}
 
-	// --- 오른쪽 끝: 화질 표시 ---
+	// --- 오른쪽부터: 오버레이 토글, 화질 표시 ---
 	float cursorRight = m_barRect.right - kBarPadding;
+
+	if (m_statsButton)
+	{
+		m_statsButton->SetLayout(placeRow(cursorRight - kButtonSize, kButtonSize));
+		cursorRight -= kButtonSize + kGap;
+	}
 
 	if (m_qualityLabel)
 	{
@@ -710,6 +745,34 @@ void ServiceControlLayer::OnGlyphButtonClicked(uint32_t commandId, void* userDat
 	{
 		self->InvokeCommand(static_cast<StreamingViewerCommand>(commandId));
 	}
+}
+
+void ServiceControlLayer::OnStatsButtonClicked(uint32_t, void* userData)
+{
+	ServiceControlLayer* self = static_cast<ServiceControlLayer*>(userData);
+	if (self && self->m_statsToggleCallback)
+	{
+		// 켜짐 표시는 여기서 뒤집지 않는다. 실제로 켜졌는지 아는 것은
+		// 파사드이고, 그쪽이 SetStatsActive 로 돌려준다. 재생 버튼이
+		// 스스로 상태를 바꾸지 않는 것과 같은 이유다.
+		self->m_statsToggleCallback(self->m_statsToggleUserData);
+	}
+}
+
+void ServiceControlLayer::SetStatsToggleCallback(FrameRequestCallback callback, void* userData)
+{
+	m_statsToggleCallback = callback;
+	m_statsToggleUserData = userData;
+}
+
+void ServiceControlLayer::SetStatsActive(bool active)
+{
+	if (m_statsButton)
+	{
+		m_statsButton->SetActive(active);
+	}
+
+	RequestFrame();
 }
 
 void ServiceControlLayer::InvokeCommand(StreamingViewerCommand command)

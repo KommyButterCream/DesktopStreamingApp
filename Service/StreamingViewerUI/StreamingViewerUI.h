@@ -10,6 +10,7 @@
 
 class D3D11ImageView;
 class ServiceControlLayer;
+class ServiceStatsLayer;
 
 // 컨트롤 바에서 눌린 것.
 //
@@ -49,6 +50,44 @@ struct StreamingQualityInfo
 	// 최근 구간의 실측 수신 비트레이트. 서버가 설정한 값이 아니라
 	// 이쪽에 실제로 도착한 양이다.
 	float bitrateMbps = 0.0f;
+};
+
+// 진단 오버레이에 띄울 값들.
+//
+// 전부 클라이언트가 아는 것뿐이다. 서버의 캡처 fps, 인코더 큐 깊이,
+// 설정된 비트레이트 목표치는 여기 없다 — 그쪽으로 오는 패킷이 없다.
+// 넣으려면 피드백의 반대 방향 패킷이 필요하고, 그건 별도 작업이다.
+//
+// 손실 카운터가 다섯으로 나뉘어 있는 것이 이 구조체의 요점이다.
+// 화면이 끊기는 증상은 하나인데 원인은 다섯이고, 어느 값이 움직이는지가
+// 곧 어느 단계가 막혔는지다.
+//
+//   chunksRejected    검증에서 걸러냄      프로토콜 / 재조립
+//   framesDiscarded   청크가 어긋남        네트워크
+//   decodeQueueDrops  유입 큐 넘침        디코더가 못 따라감
+//   poolExhausted     출력 풀 고갈        표시 쪽이 못 따라감
+//   notConsumed       아무도 안 가져감     표시 쪽이 못 따라감
+//
+// 값은 누적이다. 오버레이는 증분이 아니라 누적을 보여준다 — 진단할 때
+// 알고 싶은 것은 "지금 떨어지나" 보다 "지금까지 몇 장 잃었나" 다.
+struct StreamingStatsInfo
+{
+	bool connected = false;
+
+	// 시계열로도 그리는 값. latencyMs 는 음수면 "모름" 이다.
+	float bitrateMbps = 0.0f;
+	float latencyMs = -1.0f;
+	float presentedFps = 0.0f;
+
+	uint64_t chunksRejected = 0;
+	uint64_t framesDiscarded = 0;
+	uint64_t decodeQueueDrops = 0;
+	uint64_t poolExhausted = 0;
+	uint64_t notConsumed = 0;
+
+	uint32_t jitterBufferMs = 0;
+	float avgPaceWaitMs = 0.0f;
+	uint64_t resyncCount = 0;
 };
 
 // 뷰어 위에 스트리밍 컨트롤 바를 얹는다.
@@ -117,6 +156,19 @@ public:
 	// 돌아가므로, 통계 주기에 맞춰 매번 불러도 비용이 없다.
 	void SetQualityInfo(const StreamingQualityInfo& info);
 
+	// --- 진단 오버레이 ---
+	//
+	// 기본은 꺼짐이다. 컨트롤 바의 막대 그래프 버튼으로도 켜고 끌 수 있고,
+	// 호스트가 여기서 직접 켜도 된다(단축키를 붙이는 경우).
+	//
+	// SetStatsInfo 를 부르는 주기가 곧 스파크라인의 표본 간격이다.
+	// 500ms 로 넣으면 60칸이 30초 창이 된다. 오버레이가 꺼져 있어도
+	// 표본은 쌓이므로, 켜는 순간 지난 30초가 이미 그려져 있다.
+	void SetStatsInfo(const StreamingStatsInfo& stats);
+
+	void SetStatsVisible(bool visible);
+	bool IsStatsVisible() const;
+
 	// --- 자동 숨김 ---
 	//
 	// 마우스가 멈춰 있으면 바가 서서히 사라지고, 움직이면 다시 나타난다.
@@ -138,9 +190,13 @@ private:
 	// 누군가 프레임을 달라고 해야 한다.
 	static void RequestFrame(void* userData);
 
+	// 컨트롤 바의 오버레이 토글이 눌렸다.
+	static void ToggleStats(void* userData);
+
 private:
 	D3D11ImageView* m_viewer = nullptr;
 	ServiceControlLayer* m_layer = nullptr;
+	ServiceStatsLayer* m_statsLayer = nullptr;
 
 	// Attach 이전에 들어온 설정을 여기 담아 두었다가 레이어가 생기면
 	// 그대로 넘긴다. 호스트가 Attach 순서를 신경 쓰지 않아도 되게 한다.
@@ -151,6 +207,8 @@ private:
 	float m_latency = 0.0f;
 	float m_latencyRange = 500.0f;
 	StreamingQualityInfo m_qualityInfo = {};
+	StreamingStatsInfo m_statsInfo = {};
+	bool m_statsVisible = false;
 	bool m_autoHide = true;
 	float m_autoHideDelay = 2.5f;
 	bool m_visible = true;
