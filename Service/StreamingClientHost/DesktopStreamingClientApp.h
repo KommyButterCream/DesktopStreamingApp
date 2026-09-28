@@ -40,17 +40,80 @@ public:
 	DesktopStreamingClientApp& operator=(const DesktopStreamingClientApp&) = delete;
 
 public:
+	// --- 호스트 이벤트 ---
+	//
+	// 호스트가 알아야 할 일. 워커 스레드(IOCP, 디코더)에서 일어난 일도
+	// 전부 Initialize 를 부른 스레드로 옮겨서 통지한다 — WPF 라면 UI
+	// 스레드라 받는 쪽이 Dispatcher 를 거치지 않고 바로 화면을 고칠 수
+	// 있다. (PostHostEvent 참고)
+	//
+	// 값 a/b/c 의 뜻은 이벤트마다 다르다.
+	enum class HostEvent : uint32_t
+	{
+		ConnectionChanged = 0,   // a = DESKTOP_STREAM_CONNECTION_EVENT, b = DisconnectReason, c = WSA 오류
+		StreamInfoChanged,       // a = width, b = height, c = fps
+		PlaybackStateChanged,    // a = StreamingPlaybackState
+		Stopped,                 // a = HostStopReason
+	};
+
+	// 호스트가 부탁하지 않았는데 스스로 멈춘 이유. RequestStop 으로
+	// 멈춘 것은 부른 쪽이 이미 알므로 통지하지 않는다.
+	enum class HostStopReason : int32_t
+	{
+		ViewerClosed = 0,
+		DecoderFault,
+	};
+
+	using HostEventCallback = void (*)(HostEvent event, int32_t a, int32_t b, int32_t c, void* userData);
+
+	// Initialize 전에 걸어도 된다. 통지는 메시지 루프에서 배달되므로,
+	// 루프를 처음 돌리기 전에만 걸면 첫 접속 통지까지 받는다.
+	void SetHostEventCallback(HostEventCallback callback, void* userData);
+
 	// Initialize 와 Shutdown 은 같은 스레드에서 불러야 하고, 그 스레드는
 	// 메시지를 펌프해야 한다. 재접속 / 피드백 / 컨트롤 바 갱신 같은 주기
 	// 작업이 그 스레드의 타이머로 돈다(ServiceTick 주석 참고).
 	//
 	// 뷰어 창이 닫히거나 치명적 오류가 나면 IsRunning 이 false 가 된다.
 	// 호스트는 그걸 보고 Shutdown 을 부른다.
-	bool Initialize(const char* serverIp = "127.0.0.1", uint16_t serverPort = 27015);
+	//
+	// parentWindow 가 nullptr 이면 뷰어가 독립 창으로 뜬다(네이티브 exe).
+	// 값이 있으면 그 창의 자식으로 붙는다(WPF HwndHost 등). windowRect 는
+	// 전자일 때 화면 좌표, 후자일 때 부모의 클라이언트 좌표다.
+	bool Initialize(const char* serverIp = "127.0.0.1", uint16_t serverPort = 27015,
+		HWND parentWindow = nullptr, RECT windowRect = { 0, 0, 1920, 900 });
 	void RequestStop();
 	bool IsRunning() const;
 	void Shutdown();
 	void PrintStats();
+
+	// --- 재생 제어 (Initialize 를 부른 스레드에서) ---
+	//
+	// 컨트롤 바 버튼과 같은 경로다. 어느 쪽으로 바꾸든 PlaybackStateChanged
+	// 가 한 번 온다.
+	void StartPlayback();
+	void PausePlayback();
+	void StopPlayback();
+	StreamingPlaybackState GetPlaybackState() const;
+
+	// --- 설정 ---
+	//
+	// SetJitterBufferMs 는 어느 스레드에서 불러도 된다(디코드 스레드가
+	// 원자적으로 읽는다). 나머지는 Initialize 를 부른 스레드에서.
+	void SetJitterBufferMs(uint32_t milliseconds);
+	void SetControlBarVisible(bool visible);
+	void SetControlBarAutoHide(bool enabled);
+	void SetStatsOverlayVisible(bool visible);
+
+	// --- 조회 (Initialize 를 부른 스레드에서) ---
+	HWND GetViewerWindow() const;
+
+	// 마지막 틱(500ms 주기)에 계산한 값. 수신량 / 표시 fps 는 두 틱
+	// 사이의 증분이라 호출할 때마다 새로 잴 수 없다.
+	void GetStatsSnapshot(StreamingStatsInfo& stats, StreamingQualityInfo& quality) const;
+	void GetNetworkStats(DesktopStreamingClientStats& stats) const;
+	void GetDecoderStats(NvDecStats& stats) const;
+	uint64_t GetPresentedFrameCount() const;
 
 private:
 	static constexpr ULONGLONG STATS_INTERVAL_MS = 5'000;
@@ -95,19 +158,26 @@ private:
 	void ServiceTick();
 	static LRESULT CALLBACK TickWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 
+	// 호스트 이벤트를 틱 창으로 보낸다. 어느 스레드에서 불러도 된다.
+	//
+	// 같은 스레드에서 부를 때도 곧바로 콜백하지 않고 큐를 거친다. 재생
+	// 상태를 바꾸는 도중에 호스트 코드가 끼어들면(콜백 안에서 다시
+	// StopPlayback 을 부르는 식) 이 클래스의 상태가 반쯤 바뀐 채로
+	// 재진입한다. 큐를 거치면 늘 한 동작이 끝난 뒤에 통지된다.
+	static constexpr UINT HOST_EVENT_MESSAGE = WM_APP + 1;
+	void PostHostEvent(HostEvent event, int32_t a = 0, int32_t b = 0, int32_t c = 0);
+
 	// --- 앱 스레드에서 주기적으로 도는 일 ---
 	void ServiceFeedback(ULONGLONG now);
 	void ServiceReconnect(ULONGLONG now);
 	void ServiceViewerUI(ULONGLONG now);
 	void ServiceStatsOverlay(ULONGLONG now, ULONGLONG previousTick,
 		const DesktopStreamingClientStats& netStats,
-		const StreamingQualityInfo& qualityInfo);
+		const StreamingQualityInfo& qualityInfo,
+		float latencyMs);
 
 	// --- 재생 제어 (창 메시지 스레드) ---
 	void OnViewerUICommand(StreamingViewerCommand command);
-	void StartPlayback();
-	void PausePlayback();
-	void StopPlayback();
 	void PushPlaybackStateToUI();
 
 	// --- 콜백 진입점 ---
@@ -133,7 +203,18 @@ private:
 	volatile LONG m_running = FALSE;
 
 	// 주기 작업 타이머가 걸린 메시지 전용 창. Initialize 를 부른 스레드 소유다.
+	//
+	// 워커 스레드도 PostHostEvent 에서 이 값을 읽는다. 그래서 쓰기는
+	// InterlockedExchangePointer, 읽기는 ReadPointerAcquire 로 한다.
 	HWND m_tickWindow = nullptr;
+
+	HostEventCallback m_hostEventCallback = nullptr;
+	void* m_hostEventUserData = nullptr;
+
+	// 마지막 틱에 계산해 둔 값. GetStatsSnapshot 이 돌려준다.
+	// 틱과 조회가 같은 스레드라 보호가 필요 없다.
+	StreamingStatsInfo m_lastStats = {};
+	StreamingQualityInfo m_lastQuality = {};
 
 	// ServiceTick 이 도는 중인가. 같은 스레드에서만 만진다.
 	//

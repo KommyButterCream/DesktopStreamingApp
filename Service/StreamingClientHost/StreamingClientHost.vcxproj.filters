@@ -14,9 +14,15 @@
     <ClInclude Include="DesktopStreamingClientApp.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
+    <ClInclude Include="StreamingClientHostC.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="DesktopStreamingClientApp.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="StreamingClientHostC.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
   </ItemGroup>

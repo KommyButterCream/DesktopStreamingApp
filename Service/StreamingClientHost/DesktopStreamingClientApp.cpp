@@ -23,10 +23,29 @@ DesktopStreamingClientApp::~DesktopStreamingClientApp()
 	Shutdown();
 }
 
-bool DesktopStreamingClientApp::Initialize(const char* serverIp, uint16_t serverPort)
+bool DesktopStreamingClientApp::Initialize(const char* serverIp, uint16_t serverPort,
+	HWND parentWindow, RECT windowRect)
 {
 	::strncpy_s(m_serverIp, serverIp, _TRUNCATE);
 	m_serverPort = serverPort;
+
+	// 틱 창을 가장 먼저 만든다.
+	//
+	// 이 창은 주기 작업 타이머이면서 호스트 이벤트의 배달 통로다. 아래에서
+	// StartClient 를 부르는 순간부터 IOCP 워커가 접속 통지를 보낼 수 있는데,
+	// 그때 창이 없으면 통지가 사라진다 — 호스트는 첫 "연결됨" 을 영영 못
+	// 받는다. 그래서 워커를 하나라도 띄우기 전에 창부터 둔다.
+	//
+	// 먼저 만들어도 틱이 반쯤 만든 객체를 건드리지 않는다. WM_TIMER 는 이
+	// 스레드가 메시지를 펌프할 때만 오는데 Initialize 는 펌프하지 않고,
+	// 설령 온다 해도 ServiceTick 은 맨 끝에서 m_running 이 켜지기 전까지
+	// 아무것도 하지 않는다.
+	if (!CreateTickWindow())
+	{
+		printf_s("[DesktopStreamingClient] Failed to create the tick timer.\n");
+		Shutdown();
+		return false;
+	}
 
 	RenderEngineConfig renderEngineConfig = {};
 	renderEngineConfig.initD2D = false;
@@ -86,7 +105,6 @@ bool DesktopStreamingClientApp::Initialize(const char* serverIp, uint16_t server
 	// "가끔 끊기는 화면" 으로만 보인다.
 	m_nvDecoder->SetErrorCallback(DecoderErrorCallback, this);
 
-	DWORD windowStyle = WS_VISIBLE | WS_OVERLAPPEDWINDOW;
 	m_imageView = new D3D11ImageView();
 	if (!m_imageView)
 	{
@@ -94,7 +112,18 @@ bool DesktopStreamingClientApp::Initialize(const char* serverIp, uint16_t server
 		return false;
 	}
 
-	if (!m_imageView->Initialize(GetDesktopWindow(), RECT(0, 0, 1920, 900), windowStyle, nullptr))
+	// 부모가 주어지면 그 안에 자식 창으로 붙는다. WPF 의 HwndHost 가
+	// BuildWindowCore 에서 이 경로를 쓴다 — WPF 는 자기 창 위에 네이티브
+	// 창을 그릴 수 없으므로(airspace) 뷰어가 자식 창이 되어야 한다.
+	//
+	// 부모가 없으면 예전처럼 독립 창이다.
+	const bool asChild = (parentWindow != nullptr);
+	const HWND ownerWindow = asChild ? parentWindow : ::GetDesktopWindow();
+	const DWORD windowStyle = asChild
+		? (WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN)
+		: (WS_VISIBLE | WS_OVERLAPPEDWINDOW);
+
+	if (!m_imageView->Initialize(ownerWindow, windowRect, windowStyle, nullptr))
 	{
 		printf_s("[DesktopStreamingClient] Failed to initialize D3D11ImageView.\n");
 		Shutdown();
@@ -173,16 +202,7 @@ bool DesktopStreamingClientApp::Initialize(const char* serverIp, uint16_t server
 		m_reconnectPending = TRUE;
 	}
 
-	// 주기 작업은 마지막에 켠다. 첫 틱이 오기 전에 위의 모든 것이
-	// 준비돼 있어야 한다. (같은 스레드라 실제로 겹치지는 않지만,
-	// 실패 경로에서 반쯤 만든 객체를 틱이 건드리는 일을 원천적으로 없앤다)
-	if (!CreateTickWindow())
-	{
-		printf_s("[DesktopStreamingClient] Failed to create the tick timer.\n");
-		Shutdown();
-		return false;
-	}
-
+	// 여기서부터 ServiceTick 이 일을 한다. (틱 창은 맨 앞에서 만들었다)
 	::InterlockedExchange(&m_running, TRUE);
 	m_nextStatsTick = ::GetTickCount64() + STATS_INTERVAL_MS;
 	return true;
@@ -201,33 +221,39 @@ bool DesktopStreamingClientApp::CreateTickWindow()
 		return false;
 
 	// 메시지 전용 창. 보이지 않고 브로드캐스트도 받지 않는다 —
-	// 타이머를 걸 자리로만 쓴다.
-	m_tickWindow = ::CreateWindowExW(0, TICK_WINDOW_CLASS, L"", 0, 0, 0, 0, 0,
+	// 타이머와 호스트 이벤트를 받을 자리로만 쓴다.
+	HWND window = ::CreateWindowExW(0, TICK_WINDOW_CLASS, L"", 0, 0, 0, 0, 0,
 		HWND_MESSAGE, nullptr, ThisModule(), this);
-	if (!m_tickWindow)
+	if (!window)
 		return false;
 
-	if (::SetTimer(m_tickWindow, TICK_TIMER_ID, TICK_INTERVAL_MS, nullptr) == 0)
+	if (::SetTimer(window, TICK_TIMER_ID, TICK_INTERVAL_MS, nullptr) == 0)
 	{
-		DestroyTickWindow();
+		::DestroyWindow(window);
 		return false;
 	}
 
+	// 타이머까지 걸린 뒤에 공개한다. 워커 스레드는 이 값이 보이는 순간부터
+	// 이벤트를 보낸다.
+	::InterlockedExchangePointer(reinterpret_cast<PVOID volatile*>(&m_tickWindow), window);
 	return true;
 }
 
 void DesktopStreamingClientApp::DestroyTickWindow()
 {
-	if (!m_tickWindow)
+	// 먼저 값을 비워 워커 스레드가 더는 이 창으로 보내지 않게 한다.
+	// 이미 보낸 것은 창과 함께 버려진다.
+	HWND window = static_cast<HWND>(::InterlockedExchangePointer(
+		reinterpret_cast<PVOID volatile*>(&m_tickWindow), nullptr));
+	if (!window)
 		return;
 
 	// 창을 부수기 전에 이 객체와의 연결부터 끊는다. 소멸자가 다른 스레드에서
-	// 불려 DestroyWindow 가 실패하더라도, 그 뒤에 배달되는 WM_TIMER 가
+	// 불려 DestroyWindow 가 실패하더라도, 그 뒤에 배달되는 메시지가
 	// 지워진 객체를 부르지 않는다.
-	::SetWindowLongPtrW(m_tickWindow, GWLP_USERDATA, 0);
-	::KillTimer(m_tickWindow, TICK_TIMER_ID);
-	::DestroyWindow(m_tickWindow);
-	m_tickWindow = nullptr;
+	::SetWindowLongPtrW(window, GWLP_USERDATA, 0);
+	::KillTimer(window, TICK_TIMER_ID);
+	::DestroyWindow(window);
 
 	// 다른 인스턴스가 아직 창을 쓰고 있으면 실패한다. 그러면 그쪽이
 	// 자기 Shutdown 에서 지운다.
@@ -251,8 +277,58 @@ LRESULT CALLBACK DesktopStreamingClientApp::TickWindowProc(HWND hwnd, UINT messa
 		}
 		return 0;
 	}
+	else if (message == HOST_EVENT_MESSAGE)
+	{
+		DesktopStreamingClientApp* self =
+			reinterpret_cast<DesktopStreamingClientApp*>(::GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+
+		// 콜백을 지역 변수로 옮긴 뒤 부르고, 그 뒤로는 self 를 건드리지
+		// 않는다. 호스트가 콜백 안에서 이 객체를 지우더라도 여기서
+		// 지워진 메모리를 읽지 않게 하려는 것이다.
+		if (self && self->m_hostEventCallback)
+		{
+			const HostEventCallback callback = self->m_hostEventCallback;
+			void* userData = self->m_hostEventUserData;
+
+			// PostHostEvent 가 싼 순서 그대로 푼다.
+			//   wParam = [63:32] event  [31:0] a
+			//   lParam = [63:32] b      [31:0] c
+			const HostEvent event = static_cast<HostEvent>(static_cast<uint64_t>(wParam) >> 32);
+			const int32_t a = static_cast<int32_t>(static_cast<uint64_t>(wParam) & 0xFFFFFFFFull);
+			const int32_t b = static_cast<int32_t>(static_cast<uint64_t>(lParam) >> 32);
+			const int32_t c = static_cast<int32_t>(static_cast<uint64_t>(lParam) & 0xFFFFFFFFull);
+
+			callback(event, a, b, c, userData);
+		}
+		return 0;
+	}
 
 	return ::DefWindowProcW(hwnd, message, wParam, lParam);
+}
+
+void DesktopStreamingClientApp::PostHostEvent(HostEvent event, int32_t a, int32_t b, int32_t c)
+{
+	// 값 넷을 32비트씩 WPARAM / LPARAM 두 칸(x64 에서 각 64비트)에 싼다.
+	// 힙을 쓰지 않으므로 받는 쪽이 사라져 메시지가 버려져도 새는 것이 없다.
+	HWND window = static_cast<HWND>(::ReadPointerAcquire(
+		reinterpret_cast<PVOID const volatile*>(&m_tickWindow)));
+	if (!window)
+		return;
+
+	const WPARAM wParam = static_cast<WPARAM>(
+		(static_cast<uint64_t>(event) << 32) | static_cast<uint32_t>(a));
+	const LPARAM lParam = static_cast<LPARAM>(
+		(static_cast<uint64_t>(static_cast<uint32_t>(b)) << 32) | static_cast<uint32_t>(c));
+
+	// 실패하는 것은 창이 막 사라졌을 때뿐이다(Shutdown 이 먼저 창을 부순다).
+	// 그때 통지는 더 이상 받을 사람이 없다.
+	::PostMessageW(window, HOST_EVENT_MESSAGE, wParam, lParam);
+}
+
+void DesktopStreamingClientApp::SetHostEventCallback(HostEventCallback callback, void* userData)
+{
+	m_hostEventCallback = callback;
+	m_hostEventUserData = userData;
 }
 
 // 예전 Run() 루프의 몸통에서 메시지 펌프와 콘솔 입력을 뺀 나머지다.
@@ -380,6 +456,80 @@ void DesktopStreamingClientApp::PrintStats()
 	// 서버 쪽과 같은 사정이다. 리디렉션된 stdout 은 완전 버퍼링이라
 	// 흘려보내지 않으면 주기 지표가 제때 보이지 않는다.
 	::fflush(stdout);
+}
+
+StreamingPlaybackState DesktopStreamingClientApp::GetPlaybackState() const
+{
+	return m_playbackState;
+}
+
+void DesktopStreamingClientApp::SetJitterBufferMs(uint32_t milliseconds)
+{
+	// 디코드 스레드가 매 프레임 원자적으로 읽는다. 0 이면 페이싱을 끈다.
+	::InterlockedExchange(&m_jitterBufferMs, static_cast<LONG>(milliseconds));
+
+	// 깊이가 바뀌면 지금 기준으로 잡힌 목표 시각들이 전부 틀어진다.
+	::InterlockedExchange(&m_paceResetRequest, TRUE);
+}
+
+void DesktopStreamingClientApp::SetControlBarVisible(bool visible)
+{
+	if (m_viewerUI)
+	{
+		m_viewerUI->SetVisible(visible);
+	}
+}
+
+void DesktopStreamingClientApp::SetControlBarAutoHide(bool enabled)
+{
+	if (m_viewerUI)
+	{
+		m_viewerUI->SetAutoHide(enabled);
+	}
+}
+
+void DesktopStreamingClientApp::SetStatsOverlayVisible(bool visible)
+{
+	if (m_viewerUI)
+	{
+		m_viewerUI->SetStatsVisible(visible);
+	}
+}
+
+HWND DesktopStreamingClientApp::GetViewerWindow() const
+{
+	return m_imageView ? m_imageView->GetHWND() : nullptr;
+}
+
+void DesktopStreamingClientApp::GetStatsSnapshot(StreamingStatsInfo& stats, StreamingQualityInfo& quality) const
+{
+	stats = m_lastStats;
+	quality = m_lastQuality;
+}
+
+void DesktopStreamingClientApp::GetNetworkStats(DesktopStreamingClientStats& stats) const
+{
+	stats = {};
+	if (m_streamingClient)
+	{
+		m_streamingClient->GetStats(stats);
+	}
+}
+
+void DesktopStreamingClientApp::GetDecoderStats(NvDecStats& stats) const
+{
+	stats = {};
+	if (m_nvDecoder)
+	{
+		m_nvDecoder->GetStats(stats);
+	}
+}
+
+uint64_t DesktopStreamingClientApp::GetPresentedFrameCount() const
+{
+	// 디코드 스레드가 올리는 카운터다. x64 에서 정렬된 8바이트 읽기는
+	// 찢어지지 않으므로 PrintStats 와 같은 방식으로 읽는다.
+	return m_presentedFrames;
 }
 
 // 수신 상태를 서버에 알린다. 앱 스레드에서 부른다.
@@ -574,6 +724,10 @@ void DesktopStreamingClientApp::PushPlaybackStateToUI()
 	{
 		m_viewerUI->SetPlaybackState(m_playbackState);
 	}
+
+	// 컨트롤 바의 버튼으로 바꿨든 호스트가 불러서 바꿨든 같이 알린다.
+	// WPF 쪽에 자기 재생 버튼이 있다면 이걸 보고 모양을 맞춘다.
+	PostHostEvent(HostEvent::PlaybackStateChanged, static_cast<int32_t>(m_playbackState));
 }
 
 // 컨트롤 바의 지연 표시와 화질 표시를 갱신한다.
@@ -584,9 +738,9 @@ void DesktopStreamingClientApp::PushPlaybackStateToUI()
 // 프레임이 화면에 나오기까지 이쪽에서 붙든 시간" 이다.
 void DesktopStreamingClientApp::ServiceViewerUI(ULONGLONG now)
 {
-	if (!m_viewerUI)
-		return;
-
+	// 컨트롤 바가 없어도 계산은 한다. GetStatsSnapshot 이 이 값을 돌려주므로
+	// 바를 붙이지 못한 경우에도 호스트는 통계를 받아야 한다. 바에 넣는
+	// 줄만 m_viewerUI 를 확인한다.
 	if (now < m_nextViewerUITick)
 		return;
 
@@ -599,18 +753,20 @@ void DesktopStreamingClientApp::ServiceViewerUI(ULONGLONG now)
 	// 0 ms 로 두면 지연이 없는 것처럼 보이므로 "모름" 으로 보낸다.
 	const bool stopped = (m_playbackState == StreamingPlaybackState::Stopped);
 
-	if (stopped)
-	{
-		m_viewerUI->SetLatency(-1.0f);
-	}
-	else
+	float latencyMs = -1.0f;
+	if (!stopped)
 	{
 		const float bufferMs = static_cast<float>(::ReadAcquire(&m_jitterBufferMs));
 		const float avgWaitMs = (m_paceWaitCount > 0)
 			? static_cast<float>(m_paceWaitTotalMs) / static_cast<float>(m_paceWaitCount)
 			: 0.0f;
 
-		m_viewerUI->SetLatency(bufferMs + avgWaitMs);
+		latencyMs = bufferMs + avgWaitMs;
+	}
+
+	if (m_viewerUI)
+	{
+		m_viewerUI->SetLatency(latencyMs);
 	}
 
 	// --- 화질 표시 ---
@@ -655,9 +811,12 @@ void DesktopStreamingClientApp::ServiceViewerUI(ULONGLONG now)
 	// 기준만 새 값으로 옮겨 다음 구간부터 다시 잰다.
 	m_lastQualityBytes = netStats.chunkBytesReceived;
 
-	m_viewerUI->SetQualityInfo(qualityInfo);
+	if (m_viewerUI)
+	{
+		m_viewerUI->SetQualityInfo(qualityInfo);
+	}
 
-	ServiceStatsOverlay(now, previousTick, netStats, qualityInfo);
+	ServiceStatsOverlay(now, previousTick, netStats, qualityInfo, latencyMs);
 }
 
 // 진단 오버레이에 넣을 값을 모은다.
@@ -666,9 +825,13 @@ void DesktopStreamingClientApp::ServiceViewerUI(ULONGLONG now)
 // 서버로 가는 피드백은 합계여도 되지만(서버는 "이 뷰어가 못 따라간다"
 // 하나만 알면 된다), 화면 앞에 앉은 사람은 어느 단계가 막혔는지를
 // 알아야 한다. 합쳐 버리면 그 정보가 사라진다.
+//
+// 호스트가 GetStatsSnapshot 으로 가져갈 값도 여기서 남긴다. 오버레이와
+// 호스트가 같은 숫자를 봐야 하므로 계산을 한 곳에서 한다.
 void DesktopStreamingClientApp::ServiceStatsOverlay(ULONGLONG now, ULONGLONG previousTick,
 	const DesktopStreamingClientStats& netStats,
-	const StreamingQualityInfo& qualityInfo)
+	const StreamingQualityInfo& qualityInfo,
+	float latencyMs)
 {
 	NvDecStats decodeStats = {};
 	if (m_nvDecoder)
@@ -678,7 +841,7 @@ void DesktopStreamingClientApp::ServiceStatsOverlay(ULONGLONG now, ULONGLONG pre
 	stats.connected = netStats.connected;
 
 	stats.bitrateMbps = qualityInfo.bitrateMbps;
-	stats.latencyMs = m_viewerUI->GetLatency();
+	stats.latencyMs = latencyMs;
 
 	// 실제로 화면에 올라간 프레임 수로 잰다. 디코드된 수가 아니다 —
 	// 둘이 벌어지는 것 자체가 표시 쪽이 밀린다는 신호이고, 그건
@@ -707,7 +870,13 @@ void DesktopStreamingClientApp::ServiceStatsOverlay(ULONGLONG now, ULONGLONG pre
 		: 0.0f;
 	stats.resyncCount = m_paceResyncCount;
 
-	m_viewerUI->SetStatsInfo(stats);
+	m_lastStats = stats;
+	m_lastQuality = qualityInfo;
+
+	if (m_viewerUI)
+	{
+		m_viewerUI->SetStatsInfo(stats);
+	}
 }
 
 // 컨트롤 바에서 버튼을 눌렀다. 창 메시지 스레드에서 불린다.
@@ -741,6 +910,10 @@ void DesktopStreamingClientApp::OnViewerClosed()
 {
 	::InterlockedExchange(&m_viewerAlive, FALSE);
 	RequestStop();
+
+	// 호스트가 Shutdown 으로 지운 경우에는 틱 창이 먼저 사라졌으므로
+	// 이 통지는 나가지 않는다. 사용자가 창을 닫은 경우에만 간다.
+	PostHostEvent(HostEvent::Stopped, static_cast<int32_t>(HostStopReason::ViewerClosed));
 }
 
 void DesktopStreamingClientApp::DecoderErrorCallback(NvDecErrorCode errorCode, void* userData)
@@ -764,6 +937,9 @@ void DesktopStreamingClientApp::ConnectionCallback(DESKTOP_STREAM_CONNECTION_EVE
 // 엔진 워커 스레드에서 불린다. 표시만 남긴다.
 void DesktopStreamingClientApp::OnConnectionEvent(DESKTOP_STREAM_CONNECTION_EVENT event, DisconnectReason reason, int errorCode)
 {
+	PostHostEvent(HostEvent::ConnectionChanged,
+		static_cast<int32_t>(event), static_cast<int32_t>(reason), errorCode);
+
 	switch (event)
 	{
 	case DESKTOP_STREAM_CONNECTION_EVENT::Established:
@@ -815,6 +991,7 @@ void DesktopStreamingClientApp::OnDecoderError(NvDecErrorCode errorCode)
 	if (fatal)
 	{
 		RequestStop();
+		PostHostEvent(HostEvent::Stopped, static_cast<int32_t>(HostStopReason::DecoderFault));
 	}
 }
 
@@ -833,6 +1010,9 @@ void DesktopStreamingClientApp::OnStreamInfo(const DesktopStreamClientSessionCon
 	// 비트레이트와 함께 올라간다. 읽는 쪽은 앱 스레드다.
 	::InterlockedExchange64(&m_streamGeometry,
 		PackStreamGeometry(streamContext.width, streamContext.height, streamContext.fps));
+
+	PostHostEvent(HostEvent::StreamInfoChanged,
+		streamContext.width, streamContext.height, streamContext.fps);
 
 	// 스트림이 바뀌면 페이싱 기준도 다시 잡아야 한다. 다음 프레임이
 	// 잡도록 무효로 표시한다.

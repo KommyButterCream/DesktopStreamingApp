@@ -84,17 +84,53 @@ public:
 	DesktopStreamingServerApp& operator=(const DesktopStreamingServerApp&) = delete;
 
 public:
+	// --- 호스트 이벤트 ---
+	//
+	// 호스트가 알아야 할 일. 캡처 / 인코더 스레드에서 일어난 일도 전부
+	// Initialize 를 부른 스레드로 옮겨서 통지한다. (PostHostEvent 참고)
+	//
+	// 값 a/b/c 의 뜻은 이벤트마다 다르다.
+	enum class HostEvent : uint32_t
+	{
+		Stopped = 0,           // a = HostStopReason
+		ViewerCountChanged,    // a = 구독 중인 뷰어 수
+		StreamInfoChanged,     // a = width, b = height, c = fps (해상도 변경 재구성 뒤)
+		BitrateChanged,        // a = 이전 bps, b = 새 bps
+		CaptureEvent,          // a = CaptureEventCode, b = HRESULT
+	};
+
+	// 호스트가 부탁하지 않았는데 스스로 멈춘 이유.
+	enum class HostStopReason : int32_t
+	{
+		CaptureFaulted = 0,     // 캡처 엔진이 복구 불가
+		EncoderRebuildLimit,    // 인코더 fault 가 창 안에서 한도를 넘었다
+		EncoderRebuildFailed,   // 재구성 자체가 실패했다
+	};
+
+	using HostEventCallback = void (*)(HostEvent event, int32_t a, int32_t b, int32_t c, void* userData);
+
+	// Initialize 전에 걸어도 된다. 통지는 메시지 루프에서 배달된다.
+	void SetHostEventCallback(HostEventCallback callback, void* userData);
+
 	// Initialize 와 Shutdown 은 같은 스레드에서 불러야 하고, 그 스레드는
 	// 메시지를 펌프해야 한다. 해상도 변경 재구성 / 비트레이트 적응 같은
 	// 주기 작업이 그 스레드의 타이머로 돈다(ServiceTick 주석 참고).
 	//
 	// 캡처가 복구 불가로 떨어지거나 인코더 재생성 한도를 넘으면 IsRunning
 	// 이 false 가 된다. 호스트는 그걸 보고 Shutdown 을 부른다.
-	bool Initialize();
+	bool Initialize(uint16_t port = 27015, uint32_t maxViewers = 64);
 	void RequestStop();
 	bool IsRunning() const;
 	void Shutdown();
 	void PrintStats();
+
+	// --- 조회 (Initialize 를 부른 스레드에서) ---
+	void GetCaptureStats(CaptureStats& stats) const;
+	CaptureState GetCaptureState() const;
+	void GetEncoderStats(NvEncStats& stats) const;
+	void GetServerStats(DesktopStreamingServerStats& stats) const;
+	uint32_t GetCurrentBitrate() const;
+	void GetStreamSize(uint32_t& width, uint32_t& height) const;
 
 private:
 	static constexpr ULONGLONG STATS_INTERVAL_MS = 5'000;
@@ -148,7 +184,14 @@ private:
 	void ServiceTick();
 	static LRESULT CALLBACK TickWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 
+	// 호스트 이벤트를 틱 창으로 보낸다. 어느 스레드에서 불러도 된다.
+	// 같은 스레드에서도 곧바로 콜백하지 않고 큐를 거친다 — 재구성 도중에
+	// 호스트 코드가 끼어들지 않게 한다.
+	static constexpr UINT HOST_EVENT_MESSAGE = WM_APP + 1;
+	void PostHostEvent(HostEvent event, int32_t a = 0, int32_t b = 0, int32_t c = 0);
+
 	// --- 앱 스레드에서 주기적으로 도는 일 ---
+	void ServiceViewerCount();
 	void ServiceBitrateControl(ULONGLONG now);
 	bool ServiceStreamRebuild();
 
@@ -162,7 +205,17 @@ private:
 	volatile LONG m_running = FALSE;
 
 	// 주기 작업 타이머가 걸린 메시지 전용 창. Initialize 를 부른 스레드 소유다.
+	//
+	// 캡처 / 인코더 스레드도 PostHostEvent 에서 이 값을 읽는다. 그래서
+	// 쓰기는 InterlockedExchangePointer, 읽기는 ReadPointerAcquire 로 한다.
 	HWND m_tickWindow = nullptr;
+
+	HostEventCallback m_hostEventCallback = nullptr;
+	void* m_hostEventUserData = nullptr;
+
+	// 직전 틱의 구독 뷰어 수. 바뀌면 ViewerCountChanged 를 보낸다.
+	// StreamingServer 에는 구독 변화 콜백이 없어서 틱에서 비교한다.
+	uint32_t m_lastViewerCount = 0;
 
 	// ServiceTick 이 도는 중인가. 같은 스레드에서만 만진다.
 	//

@@ -130,9 +130,11 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="DesktopStreamingClientApp.h" />
+    <ClInclude Include="StreamingClientHostC.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="DesktopStreamingClientApp.cpp" />
+    <ClCompile Include="StreamingClientHostC.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\..\Module\Core\Core\Core.vcxproj">

@@ -23,8 +23,25 @@ DesktopStreamingServerApp::~DesktopStreamingServerApp()
 	Shutdown();
 }
 
-bool DesktopStreamingServerApp::Initialize()
+bool DesktopStreamingServerApp::Initialize(uint16_t port, uint32_t maxViewers)
 {
+	// 틱 창을 가장 먼저 만든다.
+	//
+	// 이 창은 주기 작업 타이머이면서 호스트 이벤트의 배달 통로다. 아래에서
+	// 캡처 스레드를 띄우는 순간부터 캡처 이벤트가 올 수 있는데, 그때 창이
+	// 없으면 통지가 사라진다.
+	//
+	// 먼저 만들어도 틱이 반쯤 만든 객체를 건드리지 않는다. WM_TIMER 는 이
+	// 스레드가 메시지를 펌프할 때만 오는데 Initialize 는 펌프하지 않고,
+	// 설령 온다 해도 ServiceTick 은 맨 끝에서 m_running 이 켜지기 전까지
+	// 아무것도 하지 않는다.
+	if (!CreateTickWindow())
+	{
+		printf_s("[DesktopStreamingServer] Failed to create the tick timer.\n");
+		Shutdown();
+		return false;
+	}
+
 	// Rendering Engine
 	RenderEngineConfig renderEngineConfig = {};
 	renderEngineConfig.initD2D = false;
@@ -191,12 +208,12 @@ bool DesktopStreamingServerApp::Initialize()
 		DesktopStreamingPreset::SendQueueDepth(streamProfile),
 		streamProfile.backlogMs);
 
-	if (!m_streamingServer->StartServer("0.0.0.0", 27015, 64,
+	if (!m_streamingServer->StartServer("0.0.0.0", port, maxViewers,
 		DesktopStreamingPreset::ServerSessionBuffer(streamProfile),
 		DesktopStreamingPreset::ServerPool(),
 		DesktopStreamingPreset::ServerHeartbeat()))
 	{
-		printf_s("[DesktopStreamingServer] Failed to start the streaming server on 0.0.0.0:27015.\n");
+		printf_s("[DesktopStreamingServer] Failed to start the streaming server on 0.0.0.0:%u.\n", port);
 		Shutdown();
 		return false;
 	}
@@ -220,15 +237,7 @@ bool DesktopStreamingServerApp::Initialize()
 		return false;
 	}
 
-	// 주기 작업은 마지막에 켠다. 첫 틱이 오기 전에 위의 모든 것이
-	// 준비돼 있어야 한다.
-	if (!CreateTickWindow())
-	{
-		printf_s("[DesktopStreamingServer] Failed to create the tick timer.\n");
-		Shutdown();
-		return false;
-	}
-
+	// 여기서부터 ServiceTick 이 일을 한다. (틱 창은 맨 앞에서 만들었다)
 	::InterlockedExchange(&m_running, TRUE);
 	m_nextStatsTick = ::GetTickCount64() + STATS_INTERVAL_MS;
 	return true;
@@ -248,32 +257,38 @@ bool DesktopStreamingServerApp::CreateTickWindow()
 
 	// 메시지 전용 창. 보이지 않고 브로드캐스트도 받지 않는다 —
 	// 타이머를 걸 자리로만 쓴다.
-	m_tickWindow = ::CreateWindowExW(0, TICK_WINDOW_CLASS, L"", 0, 0, 0, 0, 0,
+	HWND window = ::CreateWindowExW(0, TICK_WINDOW_CLASS, L"", 0, 0, 0, 0, 0,
 		HWND_MESSAGE, nullptr, ThisModule(), this);
-	if (!m_tickWindow)
+	if (!window)
 		return false;
 
-	if (::SetTimer(m_tickWindow, TICK_TIMER_ID, TICK_INTERVAL_MS, nullptr) == 0)
+	if (::SetTimer(window, TICK_TIMER_ID, TICK_INTERVAL_MS, nullptr) == 0)
 	{
-		DestroyTickWindow();
+		::DestroyWindow(window);
 		return false;
 	}
 
+	// 타이머까지 걸린 뒤에 공개한다. 워커 스레드는 이 값이 보이는 순간부터
+	// 이벤트를 보낸다.
+	::InterlockedExchangePointer(reinterpret_cast<PVOID volatile*>(&m_tickWindow), window);
 	return true;
 }
 
 void DesktopStreamingServerApp::DestroyTickWindow()
 {
-	if (!m_tickWindow)
+	// 먼저 값을 비워 워커 스레드가 더는 이 창으로 보내지 않게 한다.
+	// 이미 보낸 것은 창과 함께 버려진다.
+	HWND window = static_cast<HWND>(::InterlockedExchangePointer(
+		reinterpret_cast<PVOID volatile*>(&m_tickWindow), nullptr));
+	if (!window)
 		return;
 
 	// 창을 부수기 전에 이 객체와의 연결부터 끊는다. 소멸자가 다른 스레드에서
-	// 불려 DestroyWindow 가 실패하더라도, 그 뒤에 배달되는 WM_TIMER 가
+	// 불려 DestroyWindow 가 실패하더라도, 그 뒤에 배달되는 메시지가
 	// 지워진 객체를 부르지 않는다.
-	::SetWindowLongPtrW(m_tickWindow, GWLP_USERDATA, 0);
-	::KillTimer(m_tickWindow, TICK_TIMER_ID);
-	::DestroyWindow(m_tickWindow);
-	m_tickWindow = nullptr;
+	::SetWindowLongPtrW(window, GWLP_USERDATA, 0);
+	::KillTimer(window, TICK_TIMER_ID);
+	::DestroyWindow(window);
 
 	// 다른 인스턴스가 아직 창을 쓰고 있으면 실패한다. 그러면 그쪽이
 	// 자기 Shutdown 에서 지운다.
@@ -297,8 +312,56 @@ LRESULT CALLBACK DesktopStreamingServerApp::TickWindowProc(HWND hwnd, UINT messa
 		}
 		return 0;
 	}
+	else if (message == HOST_EVENT_MESSAGE)
+	{
+		DesktopStreamingServerApp* self =
+			reinterpret_cast<DesktopStreamingServerApp*>(::GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+
+		// 콜백을 지역 변수로 옮긴 뒤 부르고, 그 뒤로는 self 를 건드리지
+		// 않는다. 호스트가 콜백 안에서 이 객체를 지우더라도 여기서
+		// 지워진 메모리를 읽지 않게 하려는 것이다.
+		if (self && self->m_hostEventCallback)
+		{
+			const HostEventCallback callback = self->m_hostEventCallback;
+			void* userData = self->m_hostEventUserData;
+
+			// PostHostEvent 가 싼 순서 그대로 푼다.
+			//   wParam = [63:32] event  [31:0] a
+			//   lParam = [63:32] b      [31:0] c
+			const HostEvent event = static_cast<HostEvent>(static_cast<uint64_t>(wParam) >> 32);
+			const int32_t a = static_cast<int32_t>(static_cast<uint64_t>(wParam) & 0xFFFFFFFFull);
+			const int32_t b = static_cast<int32_t>(static_cast<uint64_t>(lParam) >> 32);
+			const int32_t c = static_cast<int32_t>(static_cast<uint64_t>(lParam) & 0xFFFFFFFFull);
+
+			callback(event, a, b, c, userData);
+		}
+		return 0;
+	}
 
 	return ::DefWindowProcW(hwnd, message, wParam, lParam);
+}
+
+void DesktopStreamingServerApp::PostHostEvent(HostEvent event, int32_t a, int32_t b, int32_t c)
+{
+	// 값 넷을 32비트씩 WPARAM / LPARAM 두 칸(x64 에서 각 64비트)에 싼다.
+	// 힙을 쓰지 않으므로 받는 쪽이 사라져 메시지가 버려져도 새는 것이 없다.
+	HWND window = static_cast<HWND>(::ReadPointerAcquire(
+		reinterpret_cast<PVOID const volatile*>(&m_tickWindow)));
+	if (!window)
+		return;
+
+	const WPARAM wParam = static_cast<WPARAM>(
+		(static_cast<uint64_t>(event) << 32) | static_cast<uint32_t>(a));
+	const LPARAM lParam = static_cast<LPARAM>(
+		(static_cast<uint64_t>(static_cast<uint32_t>(b)) << 32) | static_cast<uint32_t>(c));
+
+	::PostMessageW(window, HOST_EVENT_MESSAGE, wParam, lParam);
+}
+
+void DesktopStreamingServerApp::SetHostEventCallback(HostEventCallback callback, void* userData)
+{
+	m_hostEventCallback = callback;
+	m_hostEventUserData = userData;
 }
 
 // 예전 Run() 루프의 몸통에서 메시지 펌프와 콘솔 입력을 뺀 나머지다.
@@ -320,6 +383,9 @@ void DesktopStreamingServerApp::ServiceTick()
 	// 해상도가 바뀌었으면 인코드 파이프라인을 다시 만든다.
 	// 캡처 스레드가 세운 표시를 여기서 처리한다.
 	ServiceStreamRebuild();
+
+	// 뷰어가 붙거나 떨어졌으면 호스트에 알린다.
+	ServiceViewerCount();
 
 	// 혼잡 신호를 보고 비트레이트를 조정한다.
 	ServiceBitrateControl(now);
@@ -585,6 +651,8 @@ void DesktopStreamingServerApp::OnCaptureEvent(CaptureEventCode code, HRESULT hr
 
 	printf_s("[capture] %s (hr=0x%08X)\n", name, static_cast<unsigned int>(hr));
 
+	PostHostEvent(HostEvent::CaptureEvent, static_cast<int32_t>(code), static_cast<int32_t>(hr));
+
 	// 해상도가 바뀌거나 디바이스가 다시 만들어지면 인코더가 들고 있는
 	// 크기와 공유 풀 핸들이 전부 무효다. 여기서 다시 만드는 것이
 	// 맞지만, 이 콜백은 캡처 스레드에서 불린다 — 그 안에서 인코더를
@@ -605,6 +673,7 @@ void DesktopStreamingServerApp::OnCaptureEvent(CaptureEventCode code, HRESULT hr
 	{
 		printf_s("[capture] unrecoverable. stopping.\n");
 		RequestStop();
+		PostHostEvent(HostEvent::Stopped, static_cast<int32_t>(HostStopReason::CaptureFaulted));
 	}
 }
 
@@ -724,6 +793,9 @@ void DesktopStreamingServerApp::ServiceBitrateControl(ULONGLONG now)
 		static_cast<unsigned long long>(incompleteDelta),
 		static_cast<unsigned long long>(discardDelta),
 		static_cast<unsigned long long>(decodeDropDelta));
+
+	PostHostEvent(HostEvent::BitrateChanged,
+		static_cast<int32_t>(m_currentBitrateBps), static_cast<int32_t>(nextBitrate));
 
 	m_currentBitrateBps = nextBitrate;
 }
@@ -915,6 +987,7 @@ bool DesktopStreamingServerApp::ServiceStreamRebuild()
 			printf_s("[rebuild] the encoder faulted %u times within %llu s. giving up.\n",
 				m_faultRebuildCount, FAULT_REBUILD_WINDOW_MS / 1000ULL);
 			RequestStop();
+			PostHostEvent(HostEvent::Stopped, static_cast<int32_t>(HostStopReason::EncoderRebuildLimit));
 			return false;
 		}
 
@@ -933,6 +1006,7 @@ bool DesktopStreamingServerApp::ServiceStreamRebuild()
 	{
 		printf_s("[rebuild] failed to re-create the encoder. stopping.\n");
 		RequestStop();
+		PostHostEvent(HostEvent::Stopped, static_cast<int32_t>(HostStopReason::EncoderRebuildFailed));
 		return false;
 	}
 
@@ -940,6 +1014,7 @@ bool DesktopStreamingServerApp::ServiceStreamRebuild()
 	{
 		printf_s("[rebuild] failed to restart the encode thread. stopping.\n");
 		RequestStop();
+		PostHostEvent(HostEvent::Stopped, static_cast<int32_t>(HostStopReason::EncoderRebuildFailed));
 		return false;
 	}
 
@@ -952,7 +1027,73 @@ bool DesktopStreamingServerApp::ServiceStreamRebuild()
 	const uint32_t notified = m_streamingServer->BroadcastStreamInfo();
 
 	printf_s("[rebuild] done. %u viewer(s) notified.\n", notified);
+
+	PostHostEvent(HostEvent::StreamInfoChanged, m_streamWidth, m_streamHeight, TARGET_FPS);
 	return true;
+}
+
+// 구독 뷰어 수가 바뀌었는지 본다. 앱 스레드에서만 부른다.
+//
+// StreamingServer 에는 구독/해제 콜백이 없다. 그 통지는 IOCP 워커에서
+// 일어나는데, 새 콜백을 뚫는 대신 틱마다 수를 비교한다. GetStats 는
+// 원자 읽기 몇 개라 10ms 마다 불러도 부담이 없고, 호스트 입장에서는
+// 어차피 UI 스레드로 옮겨 받아야 하므로 지연 차이가 없다.
+void DesktopStreamingServerApp::ServiceViewerCount()
+{
+	if (!m_streamingServer)
+		return;
+
+	DesktopStreamingServerStats stats = {};
+	m_streamingServer->GetStats(stats);
+
+	if (stats.subscribedViewerCount == m_lastViewerCount)
+		return;
+
+	m_lastViewerCount = stats.subscribedViewerCount;
+	PostHostEvent(HostEvent::ViewerCountChanged, static_cast<int32_t>(m_lastViewerCount));
+}
+
+void DesktopStreamingServerApp::GetCaptureStats(CaptureStats& stats) const
+{
+	stats = {};
+	if (m_duplicateEngine)
+	{
+		stats = m_duplicateEngine->GetStats();
+	}
+}
+
+CaptureState DesktopStreamingServerApp::GetCaptureState() const
+{
+	return m_duplicateEngine ? m_duplicateEngine->GetCaptureState() : CaptureState::Idle;
+}
+
+void DesktopStreamingServerApp::GetEncoderStats(NvEncStats& stats) const
+{
+	stats = {};
+	if (m_nvEncoder)
+	{
+		m_nvEncoder->GetStats(stats);
+	}
+}
+
+void DesktopStreamingServerApp::GetServerStats(DesktopStreamingServerStats& stats) const
+{
+	stats = {};
+	if (m_streamingServer)
+	{
+		m_streamingServer->GetStats(stats);
+	}
+}
+
+uint32_t DesktopStreamingServerApp::GetCurrentBitrate() const
+{
+	return m_currentBitrateBps;
+}
+
+void DesktopStreamingServerApp::GetStreamSize(uint32_t& width, uint32_t& height) const
+{
+	width = m_streamWidth;
+	height = m_streamHeight;
 }
 
 // 엔코더 완료 스레드에서 불린다.
