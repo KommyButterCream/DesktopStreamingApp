@@ -13,12 +13,6 @@
 #include "../StreamingClient/StreamingClient.h"
 #include "../StreamingViewerUI/StreamingViewerUI.h"
 
-#ifdef BUILD_STREAMING_CLIENT_HOST_DLL
-#define STREAMING_CLIENT_HOST_API __declspec(dllexport)
-#else
-#define STREAMING_CLIENT_HOST_API __declspec(dllimport)
-#endif
-
 // 스트리밍 클라이언트 한 벌.
 //
 // 네트워크(StreamingClient) → 디코더(NvDecoder) → 페이싱 → 뷰어(ImageView)
@@ -26,9 +20,13 @@
 //
 // 예전에는 DesktopStreamingClient.exe 안의 헤더 전용 클래스였다. WPF 같은
 // 다른 호스트에서도 같은 코드를 쓰려고 StreamingClientHost.dll 로 옮겼다.
+//
+// 이 클래스는 DLL 밖으로 export 하지 않는다. 밖에서는 StreamingClientHostC.h 의 C ABI 로
+// 쓴다 — C++ 클래스를 export 하면 호스트가 이 DLL 과 같은 컴파일러 / 같은
+// CRT / 같은 헤더 버전으로 빌드돼야 하고, C# 은 아예 부를 수 없다.
 // 프레임이 지나가는 경로(디코드 → 페이싱 → UpdateSharedTexture)는 전부
 // 이 안에 있고 밖으로 나가지 않는다.
-class STREAMING_CLIENT_HOST_API DesktopStreamingClientApp
+class DesktopStreamingClientApp
 {
 public:
 	DesktopStreamingClientApp() = default;

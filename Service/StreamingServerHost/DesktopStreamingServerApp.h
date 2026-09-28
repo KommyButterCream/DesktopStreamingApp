@@ -14,12 +14,6 @@
 #include "../../../../Module/NvCodec/NvEncode/D3D11NvEncoder.h"
 #include "../StreamingServer/StreamingServer.h"
 
-#ifdef BUILD_STREAMING_SERVER_HOST_DLL
-#define STREAMING_SERVER_HOST_API __declspec(dllexport)
-#else
-#define STREAMING_SERVER_HOST_API __declspec(dllimport)
-#endif
-
 // 스트리밍 서버 한 벌.
 //
 // 캡처(DuplicateEngine) → 인코더(NvEncoder) → 브로드캐스트(StreamingServer)
@@ -28,7 +22,11 @@
 //
 // 예전에는 DesktopStreamingServer.exe 안의 헤더 전용 클래스였다. WPF 같은
 // 다른 호스트에서도 같은 코드를 쓰려고 StreamingServerHost.dll 로 옮겼다.
-class STREAMING_SERVER_HOST_API DesktopStreamingServerApp
+//
+// 이 클래스는 DLL 밖으로 export 하지 않는다. 밖에서는 StreamingServerHostC.h 의 C ABI 로
+// 쓴다 — C++ 클래스를 export 하면 호스트가 이 DLL 과 같은 컴파일러 / 같은
+// CRT / 같은 헤더 버전으로 빌드돼야 하고, C# 은 아예 부를 수 없다.
+class DesktopStreamingServerApp
 {
 public:
 	// --- 목표 스트림 : QHD(2560x1440) 60fps, 서버 하나에 여러 뷰어 ---

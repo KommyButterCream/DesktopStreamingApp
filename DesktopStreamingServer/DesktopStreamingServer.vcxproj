@@ -99,7 +99,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;D3D11_ENGINE_INTERFACE_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8</AdditionalOptions>
@@ -115,7 +115,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;D3D11_ENGINE_INTERFACE_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8</AdditionalOptions>
@@ -132,26 +132,8 @@
     <ProjectReference Include="..\..\..\Module\Core\Core\Core.vcxproj">
       <Project>{e3bd70c4-fc37-4703-9a54-152fd00bdea2}</Project>
     </ProjectReference>
-    <ProjectReference Include="..\..\..\Module\D3D11DuplicateEngine\D3D11DuplicateEngine\D3D11DuplicateEngine.vcxproj">
-      <Project>{3c17fa80-6514-434b-bc34-efd2203765be}</Project>
-    </ProjectReference>
-    <ProjectReference Include="..\..\..\Module\D3D11Engine\D3D11Engine\D3D11Engine.vcxproj">
-      <Project>{ec25124d-4c9f-40f6-8b16-ecd4db749cc8}</Project>
-    </ProjectReference>
-    <ProjectReference Include="..\..\..\Module\D3D11ImageView\D3D11ImageView\D3D11ImageView.vcxproj">
-      <Project>{fe98804b-55c7-4bca-bed6-d8785817afc1}</Project>
-    </ProjectReference>
-    <ProjectReference Include="..\..\..\Module\NvCodec\NvCodec\NvCodec.vcxproj">
-      <Project>{a074873b-b8ae-4415-bcd0-0ed579ea6dcb}</Project>
-    </ProjectReference>
-    <ProjectReference Include="..\..\..\Module\IOCPNetworkEngine\IOCPNetworkEngine\IOCPNetworkEngine.vcxproj">
-      <Project>{8baeddcb-b352-4813-a055-9ad3b9ee8653}</Project>
-    </ProjectReference>
     <ProjectReference Include="..\Service\StreamingServerHost\StreamingServerHost.vcxproj">
       <Project>{9f46af21-94c9-4b9d-90c6-8ab0558932da}</Project>
-    </ProjectReference>
-    <ProjectReference Include="..\Service\StreamingServer\StreamingServer.vcxproj">
-      <Project>{899a9742-6149-41c8-9422-56686e6b9e3a}</Project>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
