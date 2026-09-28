@@ -3,9 +3,20 @@
 #include <objbase.h>
 
 #include <stdio.h>
-#include <string>
-#include <iostream>
-#include <conio.h>
+
+// 이 DLL 자신의 모듈 핸들. 창 클래스는 등록한 모듈에 묶이므로
+// exe 의 핸들이 아니라 이것으로 등록해야 한다.
+extern "C" IMAGE_DOS_HEADER __ImageBase;
+
+namespace
+{
+	constexpr wchar_t TICK_WINDOW_CLASS[] = L"StreamingClientHost.TickWindow";
+
+	HINSTANCE ThisModule()
+	{
+		return reinterpret_cast<HINSTANCE>(&__ImageBase);
+	}
+}
 
 DesktopStreamingClientApp::~DesktopStreamingClientApp()
 {
@@ -149,12 +160,12 @@ bool DesktopStreamingClientApp::Initialize(const char* serverIp, uint16_t server
 	m_streamingClient->SetStreamInfoCallback(StreamInfoCallback, this);
 	m_streamingClient->SetFrameCallback(FrameCallback, this);
 
-	// 접속 상태 변화를 받는다. 재접속은 이 콜백 안이 아니라 Run() 의
-	// 루프가 한다 — 이 콜백은 엔진 워커 스레드에서 불리므로 그 안에서
+	// 접속 상태 변화를 받는다. 재접속은 이 콜백 안이 아니라 앱 스레드의
+	// 틱(ServiceTick)이 한다 — 이 콜백은 엔진 워커 스레드에서 불리므로 그 안에서
 	// StopClient 를 부르면 자기 스레드의 종료를 자기가 기다리게 된다.
 	m_streamingClient->SetConnectionCallback(ConnectionCallback, this);
 
-	// 서버가 아직 안 떠 있어도 실패가 아니다. 루프가 계속 다시 붙는다.
+	// 서버가 아직 안 떠 있어도 실패가 아니다. 타이머가 계속 다시 붙는다.
 	if (!m_streamingClient->StartClient(m_serverIp, m_serverPort))
 	{
 		printf_s("[DesktopStreamingClient] Initial connect to %s:%u failed. will retry.\n",
@@ -162,64 +173,116 @@ bool DesktopStreamingClientApp::Initialize(const char* serverIp, uint16_t server
 		m_reconnectPending = TRUE;
 	}
 
+	// 주기 작업은 마지막에 켠다. 첫 틱이 오기 전에 위의 모든 것이
+	// 준비돼 있어야 한다. (같은 스레드라 실제로 겹치지는 않지만,
+	// 실패 경로에서 반쯤 만든 객체를 틱이 건드리는 일을 원천적으로 없앤다)
+	if (!CreateTickWindow())
+	{
+		printf_s("[DesktopStreamingClient] Failed to create the tick timer.\n");
+		Shutdown();
+		return false;
+	}
+
 	::InterlockedExchange(&m_running, TRUE);
 	m_nextStatsTick = ::GetTickCount64() + STATS_INTERVAL_MS;
 	return true;
 }
 
-void DesktopStreamingClientApp::Run()
+bool DesktopStreamingClientApp::CreateTickWindow()
 {
-	std::string cmd;
-	MSG message = {};
+	WNDCLASSEXW windowClass = {};
+	windowClass.cbSize = sizeof(windowClass);
+	windowClass.lpfnWndProc = &DesktopStreamingClientApp::TickWindowProc;
+	windowClass.hInstance = ThisModule();
+	windowClass.lpszClassName = TICK_WINDOW_CLASS;
 
-	while (IsRunning())
+	// 인스턴스를 둘 이상 만들면 두 번째부터는 이미 등록돼 있다. 정상이다.
+	if (!::RegisterClassExW(&windowClass) && ::GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+		return false;
+
+	// 메시지 전용 창. 보이지 않고 브로드캐스트도 받지 않는다 —
+	// 타이머를 걸 자리로만 쓴다.
+	m_tickWindow = ::CreateWindowExW(0, TICK_WINDOW_CLASS, L"", 0, 0, 0, 0, 0,
+		HWND_MESSAGE, nullptr, ThisModule(), this);
+	if (!m_tickWindow)
+		return false;
+
+	if (::SetTimer(m_tickWindow, TICK_TIMER_ID, TICK_INTERVAL_MS, nullptr) == 0)
 	{
-		while (::PeekMessage(&message, nullptr, 0, 0, PM_REMOVE))
-		{
-			if (message.message == WM_QUIT)
-			{
-				RequestStop();
-				break;
-			}
-
-			::TranslateMessage(&message);
-			::DispatchMessage(&message);
-		}
-
-		if (!IsRunning())
-			break;
-
-		if (_kbhit())
-		{
-			std::getline(std::cin, cmd);
-			if (cmd == "quit")
-			{
-				RequestStop();
-			}
-			else if (cmd == "stats")
-			{
-				PrintStats();
-			}
-		}
-
-		const ULONGLONG now = ::GetTickCount64();
-
-		ServiceReconnect(now);
-
-		// 수신 상태를 서버에 알린다. 서버의 비트레이트 조정이 이걸 본다.
-		ServiceFeedback(now);
-
-		// 컨트롤 바의 지연 표시.
-		ServiceViewerUI(now);
-
-		if (now >= m_nextStatsTick)
-		{
-			m_nextStatsTick = now + STATS_INTERVAL_MS;
-			PrintStats();
-		}
-
-		::Sleep(10);
+		DestroyTickWindow();
+		return false;
 	}
+
+	return true;
+}
+
+void DesktopStreamingClientApp::DestroyTickWindow()
+{
+	if (!m_tickWindow)
+		return;
+
+	// 창을 부수기 전에 이 객체와의 연결부터 끊는다. 소멸자가 다른 스레드에서
+	// 불려 DestroyWindow 가 실패하더라도, 그 뒤에 배달되는 WM_TIMER 가
+	// 지워진 객체를 부르지 않는다.
+	::SetWindowLongPtrW(m_tickWindow, GWLP_USERDATA, 0);
+	::KillTimer(m_tickWindow, TICK_TIMER_ID);
+	::DestroyWindow(m_tickWindow);
+	m_tickWindow = nullptr;
+
+	// 다른 인스턴스가 아직 창을 쓰고 있으면 실패한다. 그러면 그쪽이
+	// 자기 Shutdown 에서 지운다.
+	::UnregisterClassW(TICK_WINDOW_CLASS, ThisModule());
+}
+
+LRESULT CALLBACK DesktopStreamingClientApp::TickWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	if (message == WM_NCCREATE)
+	{
+		const CREATESTRUCTW* create = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+		::SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(create->lpCreateParams));
+	}
+	else if (message == WM_TIMER && wParam == TICK_TIMER_ID)
+	{
+		DesktopStreamingClientApp* self =
+			reinterpret_cast<DesktopStreamingClientApp*>(::GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+		if (self)
+		{
+			self->ServiceTick();
+		}
+		return 0;
+	}
+
+	return ::DefWindowProcW(hwnd, message, wParam, lParam);
+}
+
+// 예전 Run() 루프의 몸통에서 메시지 펌프와 콘솔 입력을 뺀 나머지다.
+// 그 둘은 exe 의 몫으로 돌아갔다(main.cpp).
+void DesktopStreamingClientApp::ServiceTick()
+{
+	// 종료가 요청됐으면 아무것도 하지 않는다. 예전 Run() 이 그 순간 루프를
+	// 빠져나오던 것과 같다 — 치명적 오류 뒤에 재접속을 시도하면 안 된다.
+	if (!IsRunning() || m_inTick)
+		return;
+
+	m_inTick = true;
+
+	const ULONGLONG now = ::GetTickCount64();
+
+	ServiceReconnect(now);
+
+	// 수신 상태를 서버에 알린다. 서버의 비트레이트 조정이 이걸 본다.
+	ServiceFeedback(now);
+
+	// 컨트롤 바의 지연 표시.
+	ServiceViewerUI(now);
+
+	if (now >= m_nextStatsTick)
+	{
+		m_nextStatsTick = now + STATS_INTERVAL_MS;
+		PrintStats();
+	}
+
+	m_inTick = false;
 }
 
 void DesktopStreamingClientApp::RequestStop()
@@ -235,6 +298,11 @@ bool DesktopStreamingClientApp::IsRunning() const
 void DesktopStreamingClientApp::Shutdown()
 {
 	::InterlockedExchange(&m_running, FALSE);
+
+	// 주기 작업부터 멈춘다. 아래에서 네트워크와 디코더를 지우는 동안
+	// 틱이 그것들을 부르면 안 된다.
+	DestroyTickWindow();
+
 	::InterlockedExchange(&m_viewerAlive, FALSE);
 
 	if (m_streamingClient)
@@ -350,7 +418,7 @@ void DesktopStreamingClientApp::ServiceFeedback(ULONGLONG now)
 // 콜백 안이 아니라 여기서 하는 이유는 수명이다. StopClient 는 엔진의
 // 워커 스레드들이 빠져나오기를 기다리는데, 그 대기를 워커 스레드가
 // 스스로 하면 영원히 끝나지 않는다. 콜백은 표시만 남기고 실제 작업은
-// 앱 스레드인 이 루프가 한다.
+// 앱 스레드의 틱(ServiceTick)이 한다.
 void DesktopStreamingClientApp::ServiceReconnect(ULONGLONG now)
 {
 	if (!m_streamingClient)
@@ -663,8 +731,8 @@ void DesktopStreamingClientApp::ViewerCloseCallback(void* userData)
 
 // 뷰어 창이 파괴되기 직전에 UI 스레드에서 불린다.
 //
-// 깃발만 내린다. 네트워크/디코더 정리는 Run 이 빠져나온 뒤 Shutdown 이
-// 하던 대로 한다 — 창 메시지 처리 중에 스레드 조인까지 하면 닫기 반응이
+// 깃발만 내린다. 네트워크/디코더 정리는 호스트가 IsRunning 이 false 가 된 것을
+// 보고 Shutdown 을 부를 때 하던 대로 한다 — 창 메시지 처리 중에 스레드 조인까지 하면 닫기 반응이
 // 그만큼 늦어진다.
 //
 // 이 함수가 돌아가는 즉시 창이 파괴되고 뷰어가 정리되므로, 디코드

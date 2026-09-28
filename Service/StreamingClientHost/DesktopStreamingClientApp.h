@@ -40,8 +40,13 @@ public:
 	DesktopStreamingClientApp& operator=(const DesktopStreamingClientApp&) = delete;
 
 public:
+	// Initialize 와 Shutdown 은 같은 스레드에서 불러야 하고, 그 스레드는
+	// 메시지를 펌프해야 한다. 재접속 / 피드백 / 컨트롤 바 갱신 같은 주기
+	// 작업이 그 스레드의 타이머로 돈다(ServiceTick 주석 참고).
+	//
+	// 뷰어 창이 닫히거나 치명적 오류가 나면 IsRunning 이 false 가 된다.
+	// 호스트는 그걸 보고 Shutdown 을 부른다.
 	bool Initialize(const char* serverIp = "127.0.0.1", uint16_t serverPort = 27015);
-	void Run();
 	void RequestStop();
 	bool IsRunning() const;
 	void Shutdown();
@@ -69,6 +74,26 @@ private:
 
 	// 이보다 많이 밀렸으면 따라잡기를 포기하고 기준을 다시 잡는다.
 	static constexpr ULONGLONG MAX_PACE_DRIFT_MS = 250;
+
+	// --- 주기 작업의 구동 ---
+	//
+	// 예전에는 exe 의 Run() 루프가 10ms 마다 아래 Service* 를 불렀다. 그
+	// 루프는 메시지 펌프와 콘솔 입력까지 같이 하고 있었는데, WPF 에서는
+	// 메시지 루프를 Dispatcher 가 소유하고 콘솔이 없다. 그래서 주기 작업만
+	// 떼어 이 DLL 안의 타이머로 옮겼다.
+	//
+	// 타이머는 Initialize 를 부른 스레드에 만든 메시지 전용 창에 건다.
+	// WM_TIMER 는 그 스레드의 메시지를 펌프하는 쪽이 누구든 배달되므로 —
+	// 네이티브 exe 의 루프든 WPF Dispatcher 든 — 이 클래스는 루프가 누구
+	// 것인지 몰라도 된다. 그리고 예전처럼 그 스레드에서 돌기 때문에
+	// ServiceViewerUI 가 뷰어를 만질 때 새로운 스레드 경합이 생기지 않는다.
+	static constexpr UINT_PTR TICK_TIMER_ID = 1;
+	static constexpr UINT TICK_INTERVAL_MS = 10;
+
+	bool CreateTickWindow();
+	void DestroyTickWindow();
+	void ServiceTick();
+	static LRESULT CALLBACK TickWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 
 	// --- 앱 스레드에서 주기적으로 도는 일 ---
 	void ServiceFeedback(ULONGLONG now);
@@ -106,6 +131,16 @@ private:
 
 private:
 	volatile LONG m_running = FALSE;
+
+	// 주기 작업 타이머가 걸린 메시지 전용 창. Initialize 를 부른 스레드 소유다.
+	HWND m_tickWindow = nullptr;
+
+	// ServiceTick 이 도는 중인가. 같은 스레드에서만 만진다.
+	//
+	// 예전 Run() 루프에서는 한 틱이 끝나야 다음 틱이 왔다. 타이머로 바꾸면
+	// 틱 안에서 누군가 메시지를 펌프할 때(모달 루프 등) WM_TIMER 가 다시
+	// 들어올 수 있다. 그 재진입을 막아 예전과 같은 "한 번에 한 틱" 을 지킨다.
+	bool m_inTick = false;
 
 	// 뷰어 창이 살아 있는가. UI 스레드가 내리고 디코드 스레드가 읽는다.
 	volatile LONG m_viewerAlive = FALSE;

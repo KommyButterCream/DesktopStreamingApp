@@ -3,9 +3,20 @@
 #include <objbase.h>
 
 #include <stdio.h>
-#include <string>
-#include <iostream>
-#include <conio.h>
+
+// 이 DLL 자신의 모듈 핸들. 창 클래스는 등록한 모듈에 묶이므로
+// exe 의 핸들이 아니라 이것으로 등록해야 한다.
+extern "C" IMAGE_DOS_HEADER __ImageBase;
+
+namespace
+{
+	constexpr wchar_t TICK_WINDOW_CLASS[] = L"StreamingServerHost.TickWindow";
+
+	HINSTANCE ThisModule()
+	{
+		return reinterpret_cast<HINSTANCE>(&__ImageBase);
+	}
+}
 
 DesktopStreamingServerApp::~DesktopStreamingServerApp()
 {
@@ -209,65 +220,117 @@ bool DesktopStreamingServerApp::Initialize()
 		return false;
 	}
 
+	// 주기 작업은 마지막에 켠다. 첫 틱이 오기 전에 위의 모든 것이
+	// 준비돼 있어야 한다.
+	if (!CreateTickWindow())
+	{
+		printf_s("[DesktopStreamingServer] Failed to create the tick timer.\n");
+		Shutdown();
+		return false;
+	}
+
 	::InterlockedExchange(&m_running, TRUE);
 	m_nextStatsTick = ::GetTickCount64() + STATS_INTERVAL_MS;
 	return true;
 }
 
-void DesktopStreamingServerApp::Run()
+bool DesktopStreamingServerApp::CreateTickWindow()
 {
-	std::string cmd;
-	MSG message = {};
+	WNDCLASSEXW windowClass = {};
+	windowClass.cbSize = sizeof(windowClass);
+	windowClass.lpfnWndProc = &DesktopStreamingServerApp::TickWindowProc;
+	windowClass.hInstance = ThisModule();
+	windowClass.lpszClassName = TICK_WINDOW_CLASS;
 
-	while (IsRunning())
+	// 인스턴스를 둘 이상 만들면 두 번째부터는 이미 등록돼 있다. 정상이다.
+	if (!::RegisterClassExW(&windowClass) && ::GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+		return false;
+
+	// 메시지 전용 창. 보이지 않고 브로드캐스트도 받지 않는다 —
+	// 타이머를 걸 자리로만 쓴다.
+	m_tickWindow = ::CreateWindowExW(0, TICK_WINDOW_CLASS, L"", 0, 0, 0, 0, 0,
+		HWND_MESSAGE, nullptr, ThisModule(), this);
+	if (!m_tickWindow)
+		return false;
+
+	if (::SetTimer(m_tickWindow, TICK_TIMER_ID, TICK_INTERVAL_MS, nullptr) == 0)
 	{
-		while (::PeekMessage(&message, nullptr, 0, 0, PM_REMOVE))
-		{
-			if (message.message == WM_QUIT)
-			{
-				RequestStop();
-				break;
-			}
-
-			::TranslateMessage(&message);
-			::DispatchMessage(&message);
-		}
-
-		if (!IsRunning())
-			break;
-
-		if (_kbhit())
-		{
-			std::getline(std::cin, cmd);
-			if (cmd == "quit")
-			{
-				RequestStop();
-			}
-			else if (cmd == "stats")
-			{
-				PrintStats();
-			}
-		}
-
-		// 주기 지표. 이게 없으면 "화면이 안 나온다" 에서 캡처 / 인코딩 /
-		// 전송 중 어디가 막혔는지 알 방법이 없다.
-		const ULONGLONG now = ::GetTickCount64();
-
-		// 해상도가 바뀌었으면 인코드 파이프라인을 다시 만든다.
-		// 캡처 스레드가 세운 표시를 여기서 처리한다.
-		ServiceStreamRebuild();
-
-		// 혼잡 신호를 보고 비트레이트를 조정한다.
-		ServiceBitrateControl(now);
-
-		if (now >= m_nextStatsTick)
-		{
-			m_nextStatsTick = now + STATS_INTERVAL_MS;
-			PrintStats();
-		}
-
-		::Sleep(10);
+		DestroyTickWindow();
+		return false;
 	}
+
+	return true;
+}
+
+void DesktopStreamingServerApp::DestroyTickWindow()
+{
+	if (!m_tickWindow)
+		return;
+
+	// 창을 부수기 전에 이 객체와의 연결부터 끊는다. 소멸자가 다른 스레드에서
+	// 불려 DestroyWindow 가 실패하더라도, 그 뒤에 배달되는 WM_TIMER 가
+	// 지워진 객체를 부르지 않는다.
+	::SetWindowLongPtrW(m_tickWindow, GWLP_USERDATA, 0);
+	::KillTimer(m_tickWindow, TICK_TIMER_ID);
+	::DestroyWindow(m_tickWindow);
+	m_tickWindow = nullptr;
+
+	// 다른 인스턴스가 아직 창을 쓰고 있으면 실패한다. 그러면 그쪽이
+	// 자기 Shutdown 에서 지운다.
+	::UnregisterClassW(TICK_WINDOW_CLASS, ThisModule());
+}
+
+LRESULT CALLBACK DesktopStreamingServerApp::TickWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	if (message == WM_NCCREATE)
+	{
+		const CREATESTRUCTW* create = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+		::SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(create->lpCreateParams));
+	}
+	else if (message == WM_TIMER && wParam == TICK_TIMER_ID)
+	{
+		DesktopStreamingServerApp* self =
+			reinterpret_cast<DesktopStreamingServerApp*>(::GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+		if (self)
+		{
+			self->ServiceTick();
+		}
+		return 0;
+	}
+
+	return ::DefWindowProcW(hwnd, message, wParam, lParam);
+}
+
+// 예전 Run() 루프의 몸통에서 메시지 펌프와 콘솔 입력을 뺀 나머지다.
+// 그 둘은 exe 의 몫으로 돌아갔다(main.cpp).
+void DesktopStreamingServerApp::ServiceTick()
+{
+	// 종료가 요청됐으면 아무것도 하지 않는다. 예전 Run() 이 그 순간
+	// 루프를 빠져나오던 것과 같다 — 복구를 포기한 뒤에 다시 재구성을
+	// 시도하면 안 된다.
+	if (!IsRunning() || m_inTick)
+		return;
+
+	m_inTick = true;
+
+	// 주기 지표. 이게 없으면 "화면이 안 나온다" 에서 캡처 / 인코딩 /
+	// 전송 중 어디가 막혔는지 알 방법이 없다.
+	const ULONGLONG now = ::GetTickCount64();
+
+	// 해상도가 바뀌었으면 인코드 파이프라인을 다시 만든다.
+	// 캡처 스레드가 세운 표시를 여기서 처리한다.
+	ServiceStreamRebuild();
+
+	// 혼잡 신호를 보고 비트레이트를 조정한다.
+	ServiceBitrateControl(now);
+
+	if (now >= m_nextStatsTick)
+	{
+		m_nextStatsTick = now + STATS_INTERVAL_MS;
+		PrintStats();
+	}
+
+	m_inTick = false;
 }
 
 void DesktopStreamingServerApp::RequestStop()
@@ -283,6 +346,10 @@ bool DesktopStreamingServerApp::IsRunning() const
 void DesktopStreamingServerApp::Shutdown()
 {
 	::InterlockedExchange(&m_running, FALSE);
+
+	// 주기 작업부터 멈춘다. 아래에서 인코더를 지우는 동안 틱이
+	// 재구성을 시작하면 안 된다.
+	DestroyTickWindow();
 
 	// 큐를 먼저 닫아 워커를 깨우고, 그 다음 캡처를 멈춘다.
 	// (Destroy 도 워커를 멈추지만 순서를 명시해 둔다)
@@ -523,7 +590,7 @@ void DesktopStreamingServerApp::OnCaptureEvent(CaptureEventCode code, HRESULT hr
 	// 맞지만, 이 콜백은 캡처 스레드에서 불린다 — 그 안에서 인코더를
 	// Destroy 하면 인코드 스레드의 종료를 캡처 스레드가 기다리게 된다.
 	//
-	// 그래서 표시만 남기고 실제 재구성은 앱 루프가 한다.
+	// 그래서 표시만 남기고 실제 재구성은 앱 스레드의 틱(ServiceTick)이 한다.
 	// (ServiceStreamRebuild)
 	if (code == CaptureEventCode::ModeChanged ||
 		code == CaptureEventCode::DeviceRecreated)
@@ -911,7 +978,7 @@ void DesktopStreamingServerApp::OnEncoderError(NvEncErrorCode errorCode)
 
 	// 여기서 인코더를 직접 손대면 안 된다. 이 콜백은 완료 스레드에서
 	// 불리는데, 재생성은 Destroy 로 그 스레드를 join 하므로 자기 자신을
-	// 기다리게 된다. 표시만 세우고 앱 루프가 실제 작업을 한다.
+	// 기다리게 된다. 표시만 세우고 앱 스레드의 틱(ServiceTick)이 실제 작업을 한다.
 	//
 	// 그 사이에 들어오는 프레임은 새지 않는다. faulted 인코더는
 	// CanSubmitFrame 이 false 라 엔코드 스레드가 큐에서 꺼내 버리고,

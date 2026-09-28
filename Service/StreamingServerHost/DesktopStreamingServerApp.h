@@ -84,8 +84,13 @@ public:
 	DesktopStreamingServerApp& operator=(const DesktopStreamingServerApp&) = delete;
 
 public:
+	// Initialize 와 Shutdown 은 같은 스레드에서 불러야 하고, 그 스레드는
+	// 메시지를 펌프해야 한다. 해상도 변경 재구성 / 비트레이트 적응 같은
+	// 주기 작업이 그 스레드의 타이머로 돈다(ServiceTick 주석 참고).
+	//
+	// 캡처가 복구 불가로 떨어지거나 인코더 재생성 한도를 넘으면 IsRunning
+	// 이 false 가 된다. 호스트는 그걸 보고 Shutdown 을 부른다.
 	bool Initialize();
-	void Run();
 	void RequestStop();
 	bool IsRunning() const;
 	void Shutdown();
@@ -124,6 +129,25 @@ private:
 	bool ShouldForceKeyFrame();
 	void OnEncodedFrame(const NvEncPacket& frame);
 
+	// --- 주기 작업의 구동 ---
+	//
+	// 예전에는 exe 의 Run() 루프가 10ms 마다 아래 Service* 를 불렀다. 그
+	// 루프는 메시지 펌프와 콘솔 입력까지 같이 하고 있었는데, WPF 에서는
+	// 메시지 루프를 Dispatcher 가 소유하고 콘솔이 없다. 그래서 주기 작업만
+	// 떼어 이 DLL 안의 타이머로 옮겼다.
+	//
+	// 서버는 창이 없으므로 메시지 전용 창을 하나 만들어 타이머를 건다.
+	// 별도 스레드로 돌리지 않은 이유는 재구성(ServiceStreamRebuild)이
+	// 인코더를 부수고 다시 만드는 일이라, 예전과 같은 스레드(Initialize 를
+	// 부른 스레드)에서 도는 편이 새로운 경합을 만들지 않기 때문이다.
+	static constexpr UINT_PTR TICK_TIMER_ID = 1;
+	static constexpr UINT TICK_INTERVAL_MS = 10;
+
+	bool CreateTickWindow();
+	void DestroyTickWindow();
+	void ServiceTick();
+	static LRESULT CALLBACK TickWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+
 	// --- 앱 스레드에서 주기적으로 도는 일 ---
 	void ServiceBitrateControl(ULONGLONG now);
 	bool ServiceStreamRebuild();
@@ -132,9 +156,20 @@ private:
 	void SyncStreamSelfHealing();
 
 private:
-	// 콘솔 핸들러 스레드가 RequestStop 으로 내리고 메인 루프가 읽는다.
-	// 평범한 bool 이었다 — 두 스레드가 보는 값이라 원자 연산을 쓴다.
+	// 콘솔 핸들러 스레드나 워커 콜백이 RequestStop 으로 내리고, 호스트의
+	// 루프와 ServiceTick 이 읽는다. 평범한 bool 이었다 — 여러 스레드가
+	// 보는 값이라 원자 연산을 쓴다.
 	volatile LONG m_running = FALSE;
+
+	// 주기 작업 타이머가 걸린 메시지 전용 창. Initialize 를 부른 스레드 소유다.
+	HWND m_tickWindow = nullptr;
+
+	// ServiceTick 이 도는 중인가. 같은 스레드에서만 만진다.
+	//
+	// 예전 Run() 루프에서는 한 틱이 끝나야 다음 틱이 왔다. 타이머로 바꾸면
+	// 틱 안에서 누군가 메시지를 펌프할 때(모달 루프 등) WM_TIMER 가 다시
+	// 들어올 수 있다. 재구성 도중에 재구성이 겹치면 안 되므로 막는다.
+	bool m_inTick = false;
 
 	ULONGLONG m_nextStatsTick = 0;
 
@@ -147,12 +182,12 @@ private:
 	uint64_t m_lastViewerDiscarded = 0;
 	uint64_t m_lastViewerDecodeDropped = 0;
 
-	// 인코더 재생성 표시. 워커 스레드가 세우고 앱 루프가 내린다.
+	// 인코더 재생성 표시. 워커 스레드가 세우고 ServiceTick 이 내린다.
 	// 해상도 변경(캡처 스레드)과 인코더 fault(완료 스레드)가 같이 쓴다.
 	volatile LONG m_streamRebuildPending = FALSE;
 	volatile LONG m_rebuildFromFault = FALSE;
 
-	// fault 로 인한 재생성 횟수. 앱 루프만 만진다.
+	// fault 로 인한 재생성 횟수. ServiceTick 만 만진다.
 	// 창 안에서 한도를 넘으면 계속 되살려도 소용없다고 보고 포기한다.
 	uint32_t m_faultRebuildCount = 0;
 	uint64_t m_lastFaultRebuildTick = 0;
@@ -161,7 +196,7 @@ private:
 	uint16_t m_streamWidth = 0;
 	uint16_t m_streamHeight = 0;
 
-	// 캡처 정지 감지용. 메인 루프(PrintStats)만 만진다.
+	// 캡처 정지 감지용. PrintStats 만 만진다(주기 호출은 ServiceTick).
 	uint64_t m_lastCapturedFrames = 0;
 	uint64_t m_lastCaptureTimeouts = 0;
 	uint64_t m_captureStallTicks = 0;
