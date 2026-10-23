@@ -1054,27 +1054,62 @@ void DesktopStreamingClientApp::OnEncodedFrame(const uint8_t* frameData, uint32_
 // presentation worker waits; ImageView releases the lease after copy or discard.
 void DesktopStreamingClientApp::OnDecodedFrame(const D3D11NvDecoder::Frame& frame)
 {
-	if (!m_imageView || !frame.sharedHandle || !::ReadAcquire(&m_viewerAlive)) return;
+	if (!m_imageView || !frame.sharedHandle || !::ReadAcquire(&m_viewerAlive))
+	{
+		return;
+	}
+
 	const LONGLONG deadline = PresentationDeadline(frame.timestamp);
-	if (!::ReadAcquire(&m_presentEnabled)) return;
+	if (!::ReadAcquire(&m_presentEnabled))
+	{
+		return;
+	}
+
 	if (::InterlockedExchange(&m_poolRegistrationInvalid, FALSE) || m_registeredOutputPoolGeneration != frame.poolGeneration)
 	{
 		FlushPresentationQueue();
+
 		D3D11NvDecoder::SharedOutputPool pool;
 		if (!m_nvDecoder->GetSharedOutputPool(pool) ||
-			!m_imageView->RegisterLegacySharedTexturePool(pool.handles, pool.count)) return;
+			!m_imageView->RegisterLegacySharedTexturePool(pool.handles, pool.count))
+		{
+			return;
+		}
+
 		m_registeredOutputPoolGeneration = pool.generation;
 		printf_s("[CLIENT] Registered shared output pool: generation=%llu slots=%u\n", pool.generation, pool.count);
 	}
+
 	PresentationEntry* entry = nullptr;
 	for (auto& candidate : m_presentationEntries)
-		if (::InterlockedCompareExchange(&candidate.used, 1, 0) == 0) { entry = &candidate; break; }
-	if (!entry) return; // bounded display queue; never block compressed input
-	if (!m_nvDecoder->RetainFrame(frame)) { ::InterlockedExchange(&entry->used, 0); return; }
+	{
+		if (::InterlockedCompareExchange(&candidate.used, 1, 0) == 0)
+		{
+			entry = &candidate;
+			break;
+		}
+	}
+
+	// bounded display queue; never block compressed input
+	if (!entry)
+	{
+		return;
+	}
+
+	if (!m_nvDecoder->RetainFrame(frame))
+	{
+		::InterlockedExchange(&entry->used, 0);
+		return;
+	}
+
 	entry->owner = this;
 	entry->frame = const_cast<D3D11NvDecoder::Frame*>(&frame);
 	entry->deadline = deadline;
-	LARGE_INTEGER queuedAt; ::QueryPerformanceCounter(&queuedAt); entry->enqueuedAt = queuedAt.QuadPart;
+
+	LARGE_INTEGER queuedAt;
+	::QueryPerformanceCounter(&queuedAt);
+	entry->enqueuedAt = queuedAt.QuadPart;
+
 	::AcquireSRWLockExclusive(&m_presentationLock);
 	if (!::ReadAcquire(&m_viewerAlive))
 	{
@@ -1082,12 +1117,14 @@ void DesktopStreamingClientApp::OnDecodedFrame(const D3D11NvDecoder::Frame& fram
 		ReleasePresentationEntry(entry);
 		return;
 	}
+
 	if (m_presentationCount == _countof(m_presentationQueue))
 	{
 		// Keep the earliest deadlines. Replacing the head on every arrival
 		// can starve presentation when all queued frames are still early.
 		ReleasePresentationEntry(m_presentationQueue[--m_presentationCount]);
 	}
+
 	m_presentationQueue[m_presentationCount++] = entry;
 	::SetEvent(m_presentationChanged);
 	::ReleaseSRWLockExclusive(&m_presentationLock);
@@ -1095,26 +1132,40 @@ void DesktopStreamingClientApp::OnDecodedFrame(const D3D11NvDecoder::Frame& fram
 
 LONGLONG DesktopStreamingClientApp::PresentationDeadline(uint64_t timestamp)
 {
-	LARGE_INTEGER now; ::QueryPerformanceCounter(&now);
+	LARGE_INTEGER now;
+	::QueryPerformanceCounter(&now);
+
 	const LONG depth = ::ReadAcquire(&m_jitterBufferMs);
 	const bool reset = ::InterlockedExchange(&m_paceResetRequest, FALSE) != FALSE;
+
 	if (!m_paceBaseValid || reset || timestamp < m_paceBaseTimestamp)
 	{
 		FlushPresentationQueue();
-		m_paceBaseValid = true; m_paceBaseTimestamp = timestamp; m_paceBaseTick = now.QuadPart;
+		m_paceBaseValid = true;
+		m_paceBaseTimestamp = timestamp;
+		m_paceBaseTick = now.QuadPart;
 	}
-	if (!depth) return now.QuadPart;
+
+	if (!depth)
+	{
+		return now.QuadPart;
+	}
+
 	const LONG fps = ::ReadAcquire(&m_streamFpsAtomic);
 	const double elapsed = double(timestamp - m_paceBaseTimestamp) / (fps > 0 ? fps : 60);
 	LONGLONG target = m_paceBaseTick + static_cast<LONGLONG>((elapsed + depth / 1000.0) * m_qpcFrequency);
 	const LONGLONG delta = target - now.QuadPart;
-	if (delta > m_qpcFrequency * static_cast<LONGLONG>(MAX_PACE_WAIT_MS) / 1000 || delta < -m_qpcFrequency * static_cast<LONGLONG>(MAX_PACE_DRIFT_MS) / 1000)
+
+	if (delta > m_qpcFrequency * static_cast<LONGLONG>(MAX_PACE_WAIT_MS) / 1000 ||
+		delta < -m_qpcFrequency * static_cast<LONGLONG>(MAX_PACE_DRIFT_MS) / 1000)
 	{
 		FlushPresentationQueue();
-		m_paceBaseTimestamp = timestamp; m_paceBaseTick = now.QuadPart;
+		m_paceBaseTimestamp = timestamp;
+		m_paceBaseTick = now.QuadPart;
 		target = now.QuadPart + m_qpcFrequency * depth / 1000;
 		++m_paceResyncCount;
 	}
+
 	// Frame timestamps are encoder sequence numbers, not a calibrated remote
 	// clock. Correct drift before it exceeds the configured jitter depth.
 	const LONGLONG maxAhead = m_qpcFrequency * depth / 1000;
@@ -1123,17 +1174,29 @@ LONGLONG DesktopStreamingClientApp::PresentationDeadline(uint64_t timestamp)
 		m_paceBaseTick -= target - now.QuadPart - maxAhead;
 		target = now.QuadPart + maxAhead;
 	}
+
 	return target;
 }
 
 bool DesktopStreamingClientApp::StartPresentationThread()
 {
-	LARGE_INTEGER frequency; ::QueryPerformanceFrequency(&frequency); m_qpcFrequency = frequency.QuadPart;
+	LARGE_INTEGER frequency;
+	::QueryPerformanceFrequency(&frequency);
+	m_qpcFrequency = frequency.QuadPart;
+
 	m_presentationStop = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
 	m_presentationChanged = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
 	m_presentationTimer = ::CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
-	if (!m_presentationTimer) m_presentationTimer = ::CreateWaitableTimerW(nullptr, FALSE, nullptr);
-	if (!m_presentationStop || !m_presentationChanged || !m_presentationTimer) return false;
+	if (!m_presentationTimer)
+	{
+		m_presentationTimer = ::CreateWaitableTimerW(nullptr, FALSE, nullptr);
+	}
+
+	if (!m_presentationStop || !m_presentationChanged || !m_presentationTimer)
+	{
+		return false;
+	}
+
 	m_presentationThread = ::CreateThread(nullptr, 0, PresentationThreadEntry, this, 0, nullptr);
 	return m_presentationThread != nullptr;
 }
@@ -1149,24 +1212,32 @@ void DesktopStreamingClientApp::ReleasePresentationEntry(void* context)
 void DesktopStreamingClientApp::FlushPresentationQueue()
 {
 	::AcquireSRWLockExclusive(&m_presentationLock);
-	for (uint32_t i = 0; i < m_presentationCount; ++i) ReleasePresentationEntry(m_presentationQueue[i]);
+	for (uint32_t i = 0; i < m_presentationCount; ++i)
+	{
+		ReleasePresentationEntry(m_presentationQueue[i]);
+	}
+
 	m_presentationCount = 0;
 	::ReleaseSRWLockExclusive(&m_presentationLock);
 }
 
 DWORD WINAPI DesktopStreamingClientApp::PresentationThreadEntry(void* context)
 {
-	static_cast<DesktopStreamingClientApp*>(context)->PresentationLoop(); return 0;
+	static_cast<DesktopStreamingClientApp*>(context)->PresentationLoop();
+	return 0;
 }
 
 void DesktopStreamingClientApp::PresentationLoop()
 {
 	HANDLE waits[] = { m_presentationStop, m_presentationChanged, m_presentationTimer };
+
 	while (::WaitForSingleObject(m_presentationStop, 0) != WAIT_OBJECT_0)
 	{
 		PresentationEntry* ready = nullptr;
 		LONGLONG delay = 0;
-		LARGE_INTEGER now; ::QueryPerformanceCounter(&now);
+		LARGE_INTEGER now;
+		::QueryPerformanceCounter(&now);
+
 		::AcquireSRWLockExclusive(&m_presentationLock);
 		if (m_presentationCount)
 		{
@@ -1174,45 +1245,90 @@ void DesktopStreamingClientApp::PresentationLoop()
 			if (!enabled || m_presentationQueue[0]->deadline <= now.QuadPart)
 			{
 				ready = m_presentationQueue[0];
-				for (uint32_t i = 1; i < m_presentationCount; ++i) m_presentationQueue[i-1] = m_presentationQueue[i];
+				for (uint32_t i = 1; i < m_presentationCount; ++i)
+				{
+					m_presentationQueue[i - 1] = m_presentationQueue[i];
+				}
+
 				--m_presentationCount;
 			}
-			else delay = m_presentationQueue[0]->deadline - now.QuadPart;
+			else
+			{
+				delay = m_presentationQueue[0]->deadline - now.QuadPart;
+			}
 		}
 		::ReleaseSRWLockExclusive(&m_presentationLock);
+
 		if (ready)
 		{
 			// Per-frame scheduler residence, rather than individual event wake waits.
 			++m_paceWaitCount;
 			m_paceWaitTotalMs += (now.QuadPart - ready->enqueuedAt) * 1000 / m_qpcFrequency;
-			if (!::ReadAcquire(&m_presentEnabled) || !::ReadAcquire(&m_viewerAlive)) ReleasePresentationEntry(ready);
+
+			if (!::ReadAcquire(&m_presentEnabled) || !::ReadAcquire(&m_viewerAlive))
+			{
+				ReleasePresentationEntry(ready);
+			}
 			else if (!m_imageView->UpdateSharedTexturePoolSlot(ready->frame->slot, ReleasePresentationEntry, ready))
 			{
 				ReleasePresentationEntry(ready);
 				// Device recovery cleared the registration; decode callback retries it.
 				::InterlockedExchange(&m_poolRegistrationInvalid, TRUE);
 			}
-			else ::InterlockedIncrement64(reinterpret_cast<volatile LONG64*>(&m_presentedFrames));
+			else
+			{
+				::InterlockedIncrement64(reinterpret_cast<volatile LONG64*>(&m_presentedFrames));
+			}
+
 			continue;
 		}
+
 		::CancelWaitableTimer(m_presentationTimer);
 		if (delay > 0)
 		{
-			LARGE_INTEGER due; due.QuadPart = -((delay * 10000000LL + m_qpcFrequency - 1) / m_qpcFrequency);
+			LARGE_INTEGER due;
+			due.QuadPart = -((delay * 10000000LL + m_qpcFrequency - 1) / m_qpcFrequency);
+
 			if (!::SetWaitableTimer(m_presentationTimer, &due, 0, nullptr, nullptr, FALSE))
-			{ printf_s("[CLIENT] Presentation timer failed: %lu\n", ::GetLastError()); RequestStop(); break; }
+			{
+				printf_s("[CLIENT] Presentation timer failed: %lu\n", ::GetLastError());
+				RequestStop();
+				break;
+			}
+
 			::WaitForMultipleObjects(3, waits, FALSE, INFINITE);
 		}
-		else ::WaitForMultipleObjects(2, waits, FALSE, INFINITE);
+		else
+		{
+			::WaitForMultipleObjects(2, waits, FALSE, INFINITE);
+		}
 	}
+
 	FlushPresentationQueue();
 }
 
 void DesktopStreamingClientApp::StopPresentationThread()
 {
-	if (m_presentationStop) ::SetEvent(m_presentationStop);
-	if (m_presentationThread) { ::WaitForSingleObject(m_presentationThread, INFINITE); ::CloseHandle(m_presentationThread); m_presentationThread = nullptr; }
+	if (m_presentationStop)
+	{
+		::SetEvent(m_presentationStop);
+	}
+
+	if (m_presentationThread)
+	{
+		::WaitForSingleObject(m_presentationThread, INFINITE);
+		::CloseHandle(m_presentationThread);
+		m_presentationThread = nullptr;
+	}
+
 	FlushPresentationQueue();
+
 	for (HANDLE* handle : { &m_presentationStop, &m_presentationChanged, &m_presentationTimer })
-		if (*handle) { ::CloseHandle(*handle); *handle = nullptr; }
+	{
+		if (*handle)
+		{
+			::CloseHandle(*handle);
+			*handle = nullptr;
+		}
+	}
 }
