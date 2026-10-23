@@ -195,7 +195,29 @@ private:
 
 	// --- 디코드 스레드 ---
 	void OnDecodedFrame(const D3D11NvDecoder::Frame& frame);
-	void PaceFramePresentation(uint64_t frameTimestamp);
+	LONGLONG PresentationDeadline(uint64_t frameTimestamp);
+	bool StartPresentationThread();
+	void StopPresentationThread();
+	static DWORD WINAPI PresentationThreadEntry(void* context);
+	void PresentationLoop();
+	struct PresentationEntry {
+		DesktopStreamingClientApp* owner = nullptr;
+		D3D11NvDecoder::Frame* frame = nullptr;
+		LONGLONG deadline = 0;
+		LONGLONG enqueuedAt = 0;
+		volatile LONG used = 0;
+	};
+	static void ReleasePresentationEntry(void* context);
+	void FlushPresentationQueue();
+	SRWLOCK m_presentationLock = SRWLOCK_INIT;
+	PresentationEntry m_presentationEntries[8] = {};
+	PresentationEntry* m_presentationQueue[4] = {};
+	uint32_t m_presentationCount = 0;
+	HANDLE m_presentationThread = nullptr;
+	HANDLE m_presentationStop = nullptr;
+	HANDLE m_presentationChanged = nullptr;
+	HANDLE m_presentationTimer = nullptr;
+	LONGLONG m_qpcFrequency = 0;
 
 private:
 	volatile LONG m_running = FALSE;
@@ -301,6 +323,9 @@ private:
 
 	D3D11RenderEngine* m_D3D11Engine = nullptr;
 	D3D11NvDecoder* m_nvDecoder = nullptr;
+	// Only the decode callback writes this; reset after its worker has joined.
+	uint64_t m_registeredOutputPoolGeneration = 0;
+	volatile LONG m_poolRegistrationInvalid = FALSE;
 	D3D11ImageView* m_imageView = nullptr;
 
 	// 뷰어 위에 얹는 스트리밍 컨트롤 바. 뷰어보다 먼저 정리한다.

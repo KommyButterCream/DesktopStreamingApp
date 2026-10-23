@@ -87,6 +87,7 @@ bool DesktopStreamingClientApp::Initialize(const char* serverIp, uint16_t server
 	decoderConfig.inputQueueDepth = 8;
 	decoderConfig.maxPacketSize = DESKTOP_STREAM_MAX_FRAME_SIZE;
 	decoderConfig.sharedOutputTextureMode = true;
+	decoderConfig.sharedOutputKeyedMutex = true;
 
 	// contextGate = nullptr: 이 엔진의 immediate context 를 쓰는 주체는
 	// 디코더 하나뿐이다. ImageView 는 자기 엔진을 따로 만들고(아래 Initialize 의
@@ -169,6 +170,8 @@ bool DesktopStreamingClientApp::Initialize(const char* serverIp, uint16_t server
 			PushPlaybackStateToUI();
 		}
 	}
+
+	if (!StartPresentationThread()) { Shutdown(); return false; }
 
 	// 디코드 워커와 유입 큐를 모두 디코더가 소유한다.
 	m_nvDecoder->SetFrameCallback(DecodedFrameCallback, this);
@@ -388,10 +391,16 @@ void DesktopStreamingClientApp::Shutdown()
 		m_streamingClient = nullptr;
 	}
 
+	// Drain presentation ownership before joining decode: a reconfiguration may
+	// be waiting for the last queued/view-pending slot, even after the window closes.
+	StopPresentationThread();
+	if (m_imageView) m_imageView->UnregisterSharedTexturePool();
+
 	// 워커가 큐를 참조하므로 큐를 지우기 전에 반드시 멈춘다.
 	if (m_nvDecoder)
 	{
 		m_nvDecoder->StopDecodeThread();
+		m_registeredOutputPoolGeneration = 0;
 	}
 
 	// 컨트롤 바를 뷰어보다 먼저 뗀다. Detach 가 렌더 락 안에서
@@ -411,6 +420,9 @@ void DesktopStreamingClientApp::Shutdown()
 
 	if (m_nvDecoder)
 	{
+		unsigned retained = 0;
+		for (auto& entry : m_presentationEntries) retained += ::ReadAcquire(&entry.used) != 0;
+		printf_s("[CLIENT] Presentation shutdown: retainedSlots=%u\n", retained);
 		m_nvDecoder->Destroy();
 		delete m_nvDecoder;
 		m_nvDecoder = nullptr;
@@ -1035,119 +1047,172 @@ void DesktopStreamingClientApp::OnEncodedFrame(const uint8_t* frameData, uint32_
 	m_nvDecoder->EnqueuePacket(packet);
 }
 
-// --- 지터 버퍼 ---
-//
-// 디코드 스레드에서 불린다.
-//
-// 예전에는 도착 즉시 표시했다. 네트워크 지터가 그대로 화면 떨림이 된다 —
-// 60fps 라면 프레임 간격이 16ms 인데, 도착이 5ms 빨랐다 20ms 늦었다
-// 하면 사람 눈에 끊김으로 보인다.
-//
-// timestamp 를 쓴다. 이 값은 인코더가 넣은 프레임 순번이 NVDEC 를
-// 그대로 통과해 돌아온 것이다(picParams.inputTimeStamp). 서버의
-// 프레임 간격이 1/fps 이므로, 순번 차이에 프레임 간격을 곱하면 이
-// 프레임이 '표시되어야 할 시각' 이 나온다.
-//
-//   목표시각 = 기준시각 + (순번 - 기준순번) * (1000/fps) + 버퍼깊이
-//
-// 목표보다 이르면 그만큼 기다렸다 표시한다. 늦었으면 그냥 표시한다 —
-// 이미 늦은 것을 더 늦출 이유가 없다.
-//
-// 왜 프레임을 쌓아 두지 않고 여기서 기다리는가
-//   D3D11NvDecoder::FrameCallback 의 계약이 "frame 은 콜백이 반환할
-//   때까지만 유효하다" 다. 텍스처를 들고 나가려면 AcquireFrame /
-//   ReleaseFrame 을 직접 돌려야 하는데, 그건 디코더의 슬롯 관리를
-//   앱으로 가져오는 일이라 훨씬 크다.
-//
-//   여기서 기다리면 디코드 스레드가 그만큼 멈추고, 그게 그대로
-//   디코더 유입 큐의 백프레셔가 된다. 버퍼 깊이가 얕으면 그 대기도
-//   짧으므로 실질적으로는 '소스 박자에 맞춰 푸는' 효과만 남는다.
-//
-// 대기 상한을 두는 이유
-//   기준시각이 한 번 틀어지면(재접속, 스트림 변경) 목표시각이 한참
-//   뒤로 갈 수 있다. 그때 그대로 기다리면 화면이 멎는다. 상한을 넘으면
-//   기준을 다시 잡는다.
+// --- Asynchronous jitter buffering ---
+// Encoder sequence numbers define nominal presentation deadlines; QPC drift is
+// bounded because sequence numbers are not remote wall-clock timestamps.
+// Decode callbacks enqueue retained slots and return immediately. Only the
+// presentation worker waits; ImageView releases the lease after copy or discard.
 void DesktopStreamingClientApp::OnDecodedFrame(const D3D11NvDecoder::Frame& frame)
 {
-	if (!m_imageView)
+	if (!m_imageView || !frame.sharedHandle || !::ReadAcquire(&m_viewerAlive)) return;
+	const LONGLONG deadline = PresentationDeadline(frame.timestamp);
+	if (!::ReadAcquire(&m_presentEnabled)) return;
+	if (::InterlockedExchange(&m_poolRegistrationInvalid, FALSE) || m_registeredOutputPoolGeneration != frame.poolGeneration)
+	{
+		FlushPresentationQueue();
+		D3D11NvDecoder::SharedOutputPool pool;
+		if (!m_nvDecoder->GetSharedOutputPool(pool) ||
+			!m_imageView->RegisterLegacySharedTexturePool(pool.handles, pool.count)) return;
+		m_registeredOutputPoolGeneration = pool.generation;
+		printf_s("[CLIENT] Registered shared output pool: generation=%llu slots=%u\n", pool.generation, pool.count);
+	}
+	PresentationEntry* entry = nullptr;
+	for (auto& candidate : m_presentationEntries)
+		if (::InterlockedCompareExchange(&candidate.used, 1, 0) == 0) { entry = &candidate; break; }
+	if (!entry) return; // bounded display queue; never block compressed input
+	if (!m_nvDecoder->RetainFrame(frame)) { ::InterlockedExchange(&entry->used, 0); return; }
+	entry->owner = this;
+	entry->frame = const_cast<D3D11NvDecoder::Frame*>(&frame);
+	entry->deadline = deadline;
+	LARGE_INTEGER queuedAt; ::QueryPerformanceCounter(&queuedAt); entry->enqueuedAt = queuedAt.QuadPart;
+	::AcquireSRWLockExclusive(&m_presentationLock);
+	if (!::ReadAcquire(&m_viewerAlive))
+	{
+		::ReleaseSRWLockExclusive(&m_presentationLock);
+		ReleasePresentationEntry(entry);
 		return;
-
-	// 창이 닫히는 중이면 뷰어를 건드리지 않는다.
-	if (::ReadAcquire(&m_viewerAlive) == FALSE)
-		return;
-
-	if (!frame.sharedHandle)
-		return;
-
-	// 페이싱은 멈춰 있어도 그대로 돈다. 프레임을 계속 실시간으로
-	// 소비해야 기준 시각이 유효한 채로 남고, 그래야 재개가 다음
-	// 프레임 한 장으로 끝난다.
-	PaceFramePresentation(frame.timestamp);
-
-	// 일시정지 / 정지. 화면 갱신만 건너뛴다.
-	//
-	// 게이트가 파이프라인 맨 끝에 있는 이유는, 여기까지 오면 프레임이
-	// 이미 디코더에서 "전달됨" 으로 처리된 뒤라 어떤 드롭 카운터도
-	// 오르지 않기 때문이다. 앞쪽에서 막으면 그 드롭이 피드백을 타고
-	// 서버로 가서 비트레이트를 깎는다. (PausePlayback 주석 참고)
-	if (::ReadAcquire(&m_presentEnabled) == FALSE)
-		return;
-
-	m_imageView->UpdateSharedTexture(frame.sharedHandle);
-	++m_presentedFrames;
+	}
+	if (m_presentationCount == _countof(m_presentationQueue))
+	{
+		// Keep the earliest deadlines. Replacing the head on every arrival
+		// can starve presentation when all queued frames are still early.
+		ReleasePresentationEntry(m_presentationQueue[--m_presentationCount]);
+	}
+	m_presentationQueue[m_presentationCount++] = entry;
+	::SetEvent(m_presentationChanged);
+	::ReleaseSRWLockExclusive(&m_presentationLock);
 }
 
-void DesktopStreamingClientApp::PaceFramePresentation(uint64_t frameTimestamp)
+LONGLONG DesktopStreamingClientApp::PresentationDeadline(uint64_t timestamp)
 {
-	const uint32_t bufferDepthMs = ::ReadAcquire(&m_jitterBufferMs);
-
-	if (bufferDepthMs == 0)
-		return;   // 페이싱을 끄면 예전처럼 즉시 표시한다
-
-	const uint16_t fps = static_cast<uint16_t>(::ReadAcquire(&m_streamFpsAtomic));
-	const double frameIntervalMs = 1000.0 / fps;
-	const ULONGLONG now = ::GetTickCount64();
-
-	// 기준이 없거나 순번이 뒤로 갔으면(재접속/스트림 변경) 다시 잡는다.
-	// 스트림이 바뀌었으면 기준을 버린다. (OnStreamInfo 가 세운다)
-	const bool resetRequested = ::InterlockedExchange(&m_paceResetRequest, FALSE) != FALSE;
-
-	if (!m_paceBaseValid || resetRequested || frameTimestamp < m_paceBaseTimestamp)
+	LARGE_INTEGER now; ::QueryPerformanceCounter(&now);
+	const LONG depth = ::ReadAcquire(&m_jitterBufferMs);
+	const bool reset = ::InterlockedExchange(&m_paceResetRequest, FALSE) != FALSE;
+	if (!m_paceBaseValid || reset || timestamp < m_paceBaseTimestamp)
 	{
-		m_paceBaseValid = true;
-		m_paceBaseTimestamp = frameTimestamp;
-		m_paceBaseTick = now;
-		return;
+		FlushPresentationQueue();
+		m_paceBaseValid = true; m_paceBaseTimestamp = timestamp; m_paceBaseTick = now.QuadPart;
 	}
-
-	const uint64_t elapsedFrames = frameTimestamp - m_paceBaseTimestamp;
-	const ULONGLONG targetTick = m_paceBaseTick +
-		static_cast<ULONGLONG>(elapsedFrames * frameIntervalMs) + bufferDepthMs;
-
-	if (targetTick <= now)
+	if (!depth) return now.QuadPart;
+	const LONG fps = ::ReadAcquire(&m_streamFpsAtomic);
+	const double elapsed = double(timestamp - m_paceBaseTimestamp) / (fps > 0 ? fps : 60);
+	LONGLONG target = m_paceBaseTick + static_cast<LONGLONG>((elapsed + depth / 1000.0) * m_qpcFrequency);
+	const LONGLONG delta = target - now.QuadPart;
+	if (delta > m_qpcFrequency * static_cast<LONGLONG>(MAX_PACE_WAIT_MS) / 1000 || delta < -m_qpcFrequency * static_cast<LONGLONG>(MAX_PACE_DRIFT_MS) / 1000)
 	{
-		// 늦었다. 누적 지연이 상한을 넘으면 기준을 다시 잡는다 —
-		// 그러지 않으면 한 번 밀린 만큼 영원히 밀린 채로 간다.
-		if ((now - targetTick) > MAX_PACE_DRIFT_MS)
-		{
-			m_paceBaseTimestamp = frameTimestamp;
-			m_paceBaseTick = now;
-			++m_paceResyncCount;
-		}
-		return;
-	}
-
-	ULONGLONG waitMs = targetTick - now;
-	if (waitMs > MAX_PACE_WAIT_MS)
-	{
-		// 여기까지 오면 기준이 틀어진 것이다. 기다리지 않고 다시 잡는다.
-		m_paceBaseTimestamp = frameTimestamp;
-		m_paceBaseTick = now;
+		FlushPresentationQueue();
+		m_paceBaseTimestamp = timestamp; m_paceBaseTick = now.QuadPart;
+		target = now.QuadPart + m_qpcFrequency * depth / 1000;
 		++m_paceResyncCount;
-		return;
 	}
+	// Frame timestamps are encoder sequence numbers, not a calibrated remote
+	// clock. Correct drift before it exceeds the configured jitter depth.
+	const LONGLONG maxAhead = m_qpcFrequency * depth / 1000;
+	if (target - now.QuadPart > maxAhead)
+	{
+		m_paceBaseTick -= target - now.QuadPart - maxAhead;
+		target = now.QuadPart + maxAhead;
+	}
+	return target;
+}
 
-	::Sleep(static_cast<DWORD>(waitMs));
-	m_paceWaitTotalMs += waitMs;
-	++m_paceWaitCount;
+bool DesktopStreamingClientApp::StartPresentationThread()
+{
+	LARGE_INTEGER frequency; ::QueryPerformanceFrequency(&frequency); m_qpcFrequency = frequency.QuadPart;
+	m_presentationStop = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
+	m_presentationChanged = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
+	m_presentationTimer = ::CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+	if (!m_presentationTimer) m_presentationTimer = ::CreateWaitableTimerW(nullptr, FALSE, nullptr);
+	if (!m_presentationStop || !m_presentationChanged || !m_presentationTimer) return false;
+	m_presentationThread = ::CreateThread(nullptr, 0, PresentationThreadEntry, this, 0, nullptr);
+	return m_presentationThread != nullptr;
+}
+
+void DesktopStreamingClientApp::ReleasePresentationEntry(void* context)
+{
+	auto* entry = static_cast<PresentationEntry*>(context);
+	entry->owner->m_nvDecoder->ReleaseFrame(entry->frame);
+	entry->frame = nullptr;
+	::InterlockedExchange(&entry->used, 0);
+}
+
+void DesktopStreamingClientApp::FlushPresentationQueue()
+{
+	::AcquireSRWLockExclusive(&m_presentationLock);
+	for (uint32_t i = 0; i < m_presentationCount; ++i) ReleasePresentationEntry(m_presentationQueue[i]);
+	m_presentationCount = 0;
+	::ReleaseSRWLockExclusive(&m_presentationLock);
+}
+
+DWORD WINAPI DesktopStreamingClientApp::PresentationThreadEntry(void* context)
+{
+	static_cast<DesktopStreamingClientApp*>(context)->PresentationLoop(); return 0;
+}
+
+void DesktopStreamingClientApp::PresentationLoop()
+{
+	HANDLE waits[] = { m_presentationStop, m_presentationChanged, m_presentationTimer };
+	while (::WaitForSingleObject(m_presentationStop, 0) != WAIT_OBJECT_0)
+	{
+		PresentationEntry* ready = nullptr;
+		LONGLONG delay = 0;
+		LARGE_INTEGER now; ::QueryPerformanceCounter(&now);
+		::AcquireSRWLockExclusive(&m_presentationLock);
+		if (m_presentationCount)
+		{
+			const bool enabled = ::ReadAcquire(&m_presentEnabled) && ::ReadAcquire(&m_viewerAlive);
+			if (!enabled || m_presentationQueue[0]->deadline <= now.QuadPart)
+			{
+				ready = m_presentationQueue[0];
+				for (uint32_t i = 1; i < m_presentationCount; ++i) m_presentationQueue[i-1] = m_presentationQueue[i];
+				--m_presentationCount;
+			}
+			else delay = m_presentationQueue[0]->deadline - now.QuadPart;
+		}
+		::ReleaseSRWLockExclusive(&m_presentationLock);
+		if (ready)
+		{
+			// Per-frame scheduler residence, rather than individual event wake waits.
+			++m_paceWaitCount;
+			m_paceWaitTotalMs += (now.QuadPart - ready->enqueuedAt) * 1000 / m_qpcFrequency;
+			if (!::ReadAcquire(&m_presentEnabled) || !::ReadAcquire(&m_viewerAlive)) ReleasePresentationEntry(ready);
+			else if (!m_imageView->UpdateSharedTexturePoolSlot(ready->frame->slot, ReleasePresentationEntry, ready))
+			{
+				ReleasePresentationEntry(ready);
+				// Device recovery cleared the registration; decode callback retries it.
+				::InterlockedExchange(&m_poolRegistrationInvalid, TRUE);
+			}
+			else ::InterlockedIncrement64(reinterpret_cast<volatile LONG64*>(&m_presentedFrames));
+			continue;
+		}
+		::CancelWaitableTimer(m_presentationTimer);
+		if (delay > 0)
+		{
+			LARGE_INTEGER due; due.QuadPart = -((delay * 10000000LL + m_qpcFrequency - 1) / m_qpcFrequency);
+			if (!::SetWaitableTimer(m_presentationTimer, &due, 0, nullptr, nullptr, FALSE))
+			{ printf_s("[CLIENT] Presentation timer failed: %lu\n", ::GetLastError()); RequestStop(); break; }
+			::WaitForMultipleObjects(3, waits, FALSE, INFINITE);
+		}
+		else ::WaitForMultipleObjects(2, waits, FALSE, INFINITE);
+	}
+	FlushPresentationQueue();
+}
+
+void DesktopStreamingClientApp::StopPresentationThread()
+{
+	if (m_presentationStop) ::SetEvent(m_presentationStop);
+	if (m_presentationThread) { ::WaitForSingleObject(m_presentationThread, INFINITE); ::CloseHandle(m_presentationThread); m_presentationThread = nullptr; }
+	FlushPresentationQueue();
+	for (HANDLE* handle : { &m_presentationStop, &m_presentationChanged, &m_presentationTimer })
+		if (*handle) { ::CloseHandle(*handle); *handle = nullptr; }
 }
